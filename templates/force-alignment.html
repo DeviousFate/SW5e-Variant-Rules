@@ -1,0 +1,93 @@
+<section class="sw5e-vr-force-alignment">
+  <header class="sw5e-vr-force-alignment-summary">
+    <h2>{{actorName}}</h2>
+    <strong style="color: {{color}};">{{value}}</strong>
+  </header>
+
+  <div class="sw5e-vr-force-alignment-bar">
+    <span class="sw5e-vr-force-alignment-track"></span>
+    <span class="sw5e-vr-force-alignment-marker" style="left: {{markerPercent}}%; background: {{color}};"></span>
+  </div>
+
+  <div class="sw5e-vr-force-alignment-foot">
+    <span>Dark 100</span>
+    <span>{{tierLabel}}</span>
+    <span>Light 100</span>
+  </div>
+
+  {{#if majorBenefit}}
+    <p class="notes"><strong>Current major tier:</strong> {{majorBenefit}}</p>
+  {{/if}}
+
+  {{#if isGM}}
+    <section class="sw5e-vr-force-alignment-gm">
+      <div class="sw5e-vr-actions">
+        <button type="button" data-action="adjust" data-amount="1"><i class="fas fa-plus"></i> Light +1</button>
+        <button type="button" data-action="adjust" data-amount="-1"><i class="fas fa-minus"></i> Dark +1</button>
+      </div>
+      <div class="sw5e-vr-force-alignment-deed">
+        <input type="number" name="deedAmount" value="1" step="1" min="-100" max="100" />
+        <input type="text" name="deedNote" placeholder="Action, deed, or GM note" />
+        <button type="button" data-action="log-deed"><i class="fas fa-book"></i> Log</button>
+      </div>
+    </section>
+  {{/if}}
+
+  <section>
+    <h3>Minor Traits</h3>
+    {{#if minorTraits.length}}
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Tier</th>
+            <th>Roll</th>
+            <th>Trait</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{#each minorTraits}}
+            <tr>
+              <td>{{when}}</td>
+              <td>{{sideLabel}} {{tierLabel}}</td>
+              <td>{{roll}}</td>
+              <td>{{text}}</td>
+            </tr>
+          {{/each}}
+        </tbody>
+      </table>
+    {{else}}
+      <p class="notes">No minor traits assigned yet.</p>
+    {{/if}}
+  </section>
+
+  <section>
+    <h3>Actions and Deeds</h3>
+    {{#if deedLog.length}}
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Source</th>
+            <th>Points</th>
+            <th>Score</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{#each deedLog}}
+            <tr>
+              <td>{{when}}</td>
+              <td>{{label}}</td>
+              <td>{{pointsLabel}}</td>
+              <td>{{previous}} to {{next}}</td>
+              <td>{{note}}</td>
+            </tr>
+          {{/each}}
+        </tbody>
+      </table>
+    {{else}}
+      <p class="notes">No alignment actions have been logged yet.</p>
+    {{/if}}
+  </section>
+</section>

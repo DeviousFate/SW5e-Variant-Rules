@@ -1,6 +1,98 @@
 const MODULE_ID = "sw5e-variant-rules";
 const SOURCE_URL = "https://sw5e.com/rules/variantRules";
 const RECENT_HUNTED_CASTS = new Map();
+const RECENT_ALIGNMENT_CASTS = new Map();
+
+const FORCE_ALIGNMENT_DEFAULT = {
+  value: 0,
+  seenPowers: { lgt: {}, drk: {} },
+  resolvedMinorTiers: { benevolence: {}, corruption: {} },
+  minorTraits: [],
+  deedLog: []
+};
+
+const FORCE_ALIGNMENT_MINOR_TABLES = {
+  benevolence: {
+    1: [
+      "Your eyes brighten in satisfaction.",
+      "Your body is less likely to scar or show lasting injury.",
+      "Your voice becomes slightly more eloquent.",
+      "Tame animals are less uneasy around you."
+    ],
+    2: [
+      "Your eyes become more stark and vibrant.",
+      "Existing scars fade, and new wounds rarely scar or fester.",
+      "Your voice gains a pleasant, melodic cadence.",
+      "Your hair gains subtle gold or silver highlights."
+    ],
+    3: [
+      "Your eyes gain flecks of an unusual complimenting color.",
+      "Your skin always appears healthy.",
+      "You no longer suffer minor natural illnesses and appear in excellent health.",
+      "Wild animals are less prone to attack you."
+    ],
+    4: [
+      "Your eyes permanently become an unusual complimenting color.",
+      "Your voice becomes naturally calming.",
+      "You become nearly immune to natural illnesses.",
+      "Your hair gains visible streaks of gold or silver."
+    ],
+    5: [
+      "Your eyes permanently emit a faint glow.",
+      "You radiate a calming presence and peace.",
+      "Withered or sickly plants liven near you.",
+      "You appear 1d10 years younger."
+    ]
+  },
+  corruption: {
+    1: [
+      "Your eyes become pale yellow when you are angry.",
+      "You scar more easily.",
+      "Your voice becomes slightly hoarse.",
+      "Your hair loses color and gains gray streaks."
+    ],
+    2: [
+      "Your eyes become luminous sulfuric yellow with red rims when you are angry.",
+      "Your scars become more noticeable and wounds more pronounced.",
+      "Your voice lowers and becomes raspier.",
+      "Your hair becomes predominantly gray."
+    ],
+    3: [
+      "Your eyes permanently become luminous sulfuric yellow with red rings.",
+      "Your skin loses pigmentation and becomes pale or mottled.",
+      "Your veins become increasingly visible.",
+      "Your hair becomes stark white."
+    ],
+    4: [
+      "Your eyes become luminous dark orange with red rings.",
+      "Your skin becomes nearly stark white and your veins are accentuated.",
+      "Your nails or claws wither, grow longer, and turn a vile yellow.",
+      "Your hair withers and falls out."
+    ],
+    5: [
+      "Your eyes become luminous blood red with red rings.",
+      "You become physically devoid of emotions.",
+      "You develop a sickly, uncontrollable cough.",
+      "You appear 1d10 years older."
+    ]
+  }
+};
+
+const FORCE_ALIGNMENT_MAJOR_BENEFITS = {
+  1: "Spend 1 Force Point to add 1d4 to a Persuasion check to calm, create peace, or ally with a creature within 30 feet.",
+  2: "Spend 1 Force Point to let an ally within 30 feet reroll a failed save against being frightened.",
+  3: "Spend 1 Force Point to let an ally within 30 feet reroll a natural 1 on an ability check or saving throw.",
+  4: "Light powers cost 1 fewer Force Point, and dark powers cost 1 additional Force Point.",
+  5: "Luminous Being boon. Roll or assign one boon from the Luminous Being table."
+};
+
+const FORCE_ALIGNMENT_MAJOR_CORRUPTIONS = {
+  1: "You have advantage on Intimidation checks and disadvantage on Insight checks against creatures with a higher Wisdom.",
+  2: "You have advantage on saves against being frightened and disadvantage on saves against being charmed.",
+  3: "You have advantage on saves against dark powers, and healing from light powers is halved.",
+  4: "Dark powers cost 1 fewer Force Point, and light powers cost 1 additional Force Point.",
+  5: "Dark Entity boon. Roll or assign one boon from the Dark Entity table."
+};
 
 const RULES = [
   rule("asi-feat", "ASI and a Feat", "character", "Manual", "Characters receiving an Ability Score Improvement can take +1 to one ability score and a feat.", "Foundry can store the final ability score and feat item, but SW5e level-up choices and balance decisions are table-managed."),
@@ -25,7 +117,7 @@ const RULES = [
   rule("elevation", "Elevation", "combat", "Manual", "Height and relative position can modify ranged and melee combat.", "Foundry token elevation data is not enough to infer all cover, reach, and line-of-fire rulings."),
   rule("exertion", "Exertion", "combat", "Manual", "Characters can push beyond normal limits at a cost such as exhaustion.", "The trigger and acceptable cost are player and GM choices."),
   rule("flanking", "Flanking", "combat", "Manual", "Positioning around a target can grant combat benefits.", "Reliable automation requires a grid geometry and reach model that matches the table's tokens, sizes, and diagonals."),
-  rule("force-alignment", "Force Alignment", "casting", "Manual", "Force power use can interact with a character's light, dark, or universal alignment.", "Alignment consequences are campaign-state decisions."),
+  rule("force-alignment", "Force Alignment", "casting", "Automated", "Force power use shifts a character toward light or dark alignment, with tier saves for minor traits.", "Automated for class-sourced light and dark Force powers of 1st level or higher. At-wills, universal powers, tech powers, and detectable non-class sources are ignored. GM deed adjustments and trait logs are available on the SWVR Actor Sheet panel."),
   rule("force-tech-prowess", "Force and Tech Prowess", "character", "Manual", "Characters can develop broader force or tech capability.", "This is feat/feature and power-list progression data."),
   rule("force-bond", "Force-Bond", "theme", "Manual", "Characters can share a force-linked bond with narrative and situational effects.", "The benefit is intentionally relationship- and scene-dependent."),
   rule("gestalt-dichotomous", "Gestalt and Dichotomous Characters", "character", "Manual", "Characters can progress through multiple class structures in nonstandard ways.", "This requires alternate character-builder progression and cannot be inferred from an actor sheet."),
@@ -251,6 +343,359 @@ function summarizeForcePowerSources(sources = {}) {
   if (sources.feats?.length) parts.push(`Feat: ${sources.feats.join(", ")}`);
   if (sources.other?.length) parts.push(`Other: ${sources.other.join(", ")}`);
   return parts.join(" | ") || "No Force-power-granting class, feat, or other source detected on the actor.";
+}
+
+function forceAlignmentState(actor) {
+  const stored = foundry.utils.deepClone(actor?.getFlag(MODULE_ID, "forceAlignment") ?? {});
+  return foundry.utils.mergeObject(foundry.utils.deepClone(FORCE_ALIGNMENT_DEFAULT), stored, {
+    inplace: false,
+    insertKeys: true,
+    overwrite: true
+  });
+}
+
+async function setForceAlignmentState(actor, state) {
+  state.value = clampForceAlignment(state.value);
+  state.seenPowers ??= { lgt: {}, drk: {} };
+  state.seenPowers.lgt ??= {};
+  state.seenPowers.drk ??= {};
+  state.resolvedMinorTiers ??= { benevolence: {}, corruption: {} };
+  state.resolvedMinorTiers.benevolence ??= {};
+  state.resolvedMinorTiers.corruption ??= {};
+  state.minorTraits = [...(state.minorTraits ?? [])].slice(-50);
+  state.deedLog = [...(state.deedLog ?? [])].slice(-200);
+  await actor.setFlag(MODULE_ID, "forceAlignment", state);
+}
+
+function clampForceAlignment(value) {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(-100, Math.min(100, Math.trunc(numeric)));
+}
+
+function forceAlignmentSide(value) {
+  if (value > 0) return "benevolence";
+  if (value < 0) return "corruption";
+  return "neutral";
+}
+
+function forceAlignmentTier(value) {
+  const abs = Math.abs(Number(value ?? 0));
+  return Math.min(5, Math.floor(abs / 20) + (abs >= 10 ? 1 : 0));
+}
+
+function forceAlignmentTierLabel(value) {
+  const side = forceAlignmentSide(value);
+  const abs = Math.abs(Number(value ?? 0));
+  if (side === "neutral" || abs < 10) return "Neutral";
+  const minorTier = Math.min(5, Math.floor((abs + 10) / 20));
+  const majorTier = Math.min(5, Math.floor(abs / 20));
+  const sideLabel = side === "benevolence" ? "Benevolence" : "Corruption";
+  const parts = [];
+  if (abs >= 10) parts.push(`Minor ${sideLabel} ${romanNumeral(minorTier)}`);
+  if (majorTier > 0) {
+    const majorLabel = side === "benevolence" ? "Major Benevolence" : "Major Corruption";
+    parts.push(`${majorLabel} ${romanNumeral(majorTier)}`);
+  }
+  if (abs >= 100) parts.push(side === "benevolence" ? "Luminous Being" : "Dark Entity");
+  return parts.join(" / ");
+}
+
+function forceAlignmentMajorBenefit(value) {
+  const side = forceAlignmentSide(value);
+  const tier = Math.min(5, Math.floor(Math.abs(Number(value ?? 0)) / 20));
+  if (tier <= 0) return "";
+  return side === "benevolence" ? FORCE_ALIGNMENT_MAJOR_BENEFITS[tier] : FORCE_ALIGNMENT_MAJOR_CORRUPTIONS[tier];
+}
+
+function romanNumeral(value) {
+  return ["", "I", "II", "III", "IV", "V"][Number(value)] ?? String(value);
+}
+
+function forceAlignmentMarkerPercent(value) {
+  return ((clampForceAlignment(value) + 100) / 200) * 100;
+}
+
+function interpolateColor(start, end, ratio) {
+  const parse = (hex) => hex.replace("#", "").match(/.{2}/g).map((part) => parseInt(part, 16));
+  const [sr, sg, sb] = parse(start);
+  const [er, eg, eb] = parse(end);
+  const channel = (s, e) => Math.round(s + ((e - s) * ratio)).toString(16).padStart(2, "0");
+  return `#${channel(sr, er)}${channel(sg, eg)}${channel(sb, eb)}`;
+}
+
+function forceAlignmentColor(value) {
+  const score = clampForceAlignment(value);
+  if (score === 0) return "#A0A0A0";
+  if (score > 0) return interpolateColor("#A0A0A0", "#0080FF", score / 100);
+  return interpolateColor("#A0A0A0", "#FF0000", Math.abs(score) / 100);
+}
+
+function normalizePowerKey(item) {
+  return String(item?.name ?? item?.id ?? "unknown").trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function actorHasClassForcePowerSource(actor) {
+  return detectForcePowerSources(actor, null).classes.length > 0;
+}
+
+function actorHasForceAlignmentSurface(actor) {
+  if (!actor) return false;
+  const state = forceAlignmentState(actor);
+  if (state.value || state.minorTraits?.length || state.deedLog?.length) return true;
+  return [...(actor.items ?? [])].some((item) => item.type === "spell" && ["lgt", "drk"].includes(item.system?.school) && forcePowerLevel(item) > 0);
+}
+
+function isLikelyNonClassPowerSource(item) {
+  const source = itemSourceLabel(item).toLowerCase();
+  return /\b(feat|background|species|race|equipment|consumable|loot)\b/.test(source);
+}
+
+function isForceAlignmentPowerItem(item) {
+  if (!item || item.type !== "spell") return false;
+  const school = item.system?.school;
+  if (!["lgt", "drk"].includes(school)) return false;
+  if (forcePowerLevel(item) <= 0) return false;
+  if (!actorHasClassForcePowerSource(item.actor)) return false;
+  if (isLikelyNonClassPowerSource(item)) return false;
+  return true;
+}
+
+function crossedMinorTiers(previous, next) {
+  const thresholds = [10, 30, 50, 70, 90];
+  const side = forceAlignmentSide(next);
+  if (side === "neutral") return [];
+  const oldProgress = forceAlignmentSide(previous) === side ? Math.abs(previous) : 0;
+  const newProgress = Math.abs(next);
+  return thresholds
+    .filter((threshold) => oldProgress < threshold && newProgress >= threshold)
+    .map((threshold) => Math.floor((threshold + 10) / 20));
+}
+
+function forceAlignmentSaveAbility(side) {
+  return side === "benevolence" ? "cha" : "wis";
+}
+
+function forceAlignmentSaveDc(tier) {
+  return 10 + (Number(tier) * 2);
+}
+
+function forceAlignmentSaveLabel(side) {
+  return side === "benevolence" ? "Benevolence" : "Corruption";
+}
+
+function forceAlignmentLogEntry(data) {
+  return {
+    id: foundry.utils.randomID(),
+    timestamp: new Date().toISOString(),
+    userId: game.user.id,
+    userName: game.user.name,
+    ...data
+  };
+}
+
+async function applyForceAlignmentDelta(actor, delta, options = {}) {
+  if (!actor) return null;
+  const state = forceAlignmentState(actor);
+  const previous = clampForceAlignment(state.value);
+  const next = clampForceAlignment(previous + Number(delta ?? 0));
+  const nextSide = forceAlignmentSide(next);
+  const pendingMinorTiers = crossedMinorTiers(previous, next).filter((tier) => !state.resolvedMinorTiers?.[nextSide]?.[tier]);
+  if (nextSide !== "neutral") {
+    state.resolvedMinorTiers ??= { benevolence: {}, corruption: {} };
+    state.resolvedMinorTiers[nextSide] ??= {};
+    for (const tier of pendingMinorTiers) state.resolvedMinorTiers[nextSide][tier] = true;
+  }
+  const entry = forceAlignmentLogEntry({
+    kind: options.kind ?? "manual",
+    label: options.label ?? "Manual GM adjustment",
+    note: options.note ?? "",
+    itemId: options.itemId,
+    itemName: options.itemName,
+    school: options.school,
+    level: options.level,
+    firstCast: options.firstCast,
+    points: Number(delta ?? 0),
+    previous,
+    next
+  });
+
+  state.value = next;
+  state.deedLog = [...(state.deedLog ?? []), entry];
+  await setForceAlignmentState(actor, state);
+
+  for (const tier of pendingMinorTiers) {
+    requestForceAlignmentMinorSave(actor, nextSide, tier);
+  }
+  return { previous, next, entry };
+}
+
+async function recordForceAlignmentCast(payload) {
+  if (!game.user.isGM) return;
+  const actor = await fromUuid(payload.actorUuid);
+  if (!actor) return;
+
+  const state = forceAlignmentState(actor);
+  const school = payload.school;
+  const key = payload.powerKey;
+  const seen = state.seenPowers?.[school]?.[key];
+  const firstCast = !seen;
+  const points = firstCast ? Number(payload.level ?? 0) : 1;
+  if (!points) return;
+
+  state.seenPowers[school][key] = {
+    itemName: payload.itemName,
+    firstSeen: seen?.firstSeen ?? new Date().toISOString(),
+    lastSeen: new Date().toISOString(),
+    casts: Number(seen?.casts ?? 0) + 1
+  };
+  await setForceAlignmentState(actor, state);
+
+  const delta = school === "lgt" ? points : -points;
+  await applyForceAlignmentDelta(actor, delta, {
+    kind: "cast",
+    label: `${payload.itemName} cast`,
+    itemId: payload.itemId,
+    itemName: payload.itemName,
+    school,
+    level: Number(payload.level ?? 0),
+    firstCast,
+    note: firstCast ? "First class-sourced casting of this power." : "Repeat class-sourced casting of this power."
+  });
+}
+
+async function handleForceAlignmentPowerCast(item) {
+  if (!isEnabled("force-alignment") || !isForceAlignmentPowerItem(item)) return;
+  const dedupeKey = `${game.user.id}:${item.uuid ?? item.id}:${item.actor?.id ?? ""}`;
+  const now = Date.now();
+  const recent = RECENT_ALIGNMENT_CASTS.get(dedupeKey);
+  if (recent && now - recent < 1500) return;
+  RECENT_ALIGNMENT_CASTS.set(dedupeKey, now);
+  for (const [key, timestamp] of RECENT_ALIGNMENT_CASTS.entries()) {
+    if (now - timestamp > 5000) RECENT_ALIGNMENT_CASTS.delete(key);
+  }
+
+  const payload = {
+    actorUuid: item.actor?.uuid,
+    actorId: item.actor?.id,
+    actorName: item.actor?.name,
+    itemId: item.id,
+    itemName: item.name,
+    school: item.system?.school,
+    level: forcePowerLevel(item),
+    powerKey: normalizePowerKey(item)
+  };
+
+  if (game.user.isGM) await recordForceAlignmentCast(payload);
+  else game.socket.emit(`module.${MODULE_ID}`, { type: "forceAlignmentCast", payload });
+}
+
+function requestForceAlignmentMinorSave(actor, side, tier) {
+  const user = resolveUserForActor(actor, game.user.id);
+  const payload = {
+    actorUuid: actor.uuid,
+    actorName: actor.name,
+    userId: user.id,
+    side,
+    tier,
+    dc: forceAlignmentSaveDc(tier)
+  };
+  if (user.id !== game.user.id && user.active) {
+    game.socket.emit(`module.${MODULE_ID}`, { type: "forceAlignmentMinorSaveRequest", payload });
+  } else {
+    showForceAlignmentMinorSaveDialog(payload);
+  }
+}
+
+async function showForceAlignmentMinorSaveDialog(payload) {
+  const actor = await fromUuid(payload.actorUuid);
+  if (!actor) return;
+  const ability = forceAlignmentSaveAbility(payload.side);
+  const label = forceAlignmentSaveLabel(payload.side);
+  const content = `<p>${actor.name} reached Minor ${label} ${romanNumeral(payload.tier)}.</p><p>Roll a ${ability.toUpperCase()} save against DC ${payload.dc}, or choose to fail and gain a minor trait.</p>`;
+  new Dialog({
+    title: `Force Alignment: Minor ${label} ${romanNumeral(payload.tier)}`,
+    content,
+    buttons: {
+      roll: {
+        icon: '<i class="fas fa-dice-d20"></i>',
+        label: "Roll Save",
+        callback: () => resolveForceAlignmentMinorSave(actor, payload.side, payload.tier, payload.dc, false)
+      },
+      fail: {
+        icon: '<i class="fas fa-times"></i>',
+        label: "Choose to Fail",
+        callback: () => resolveForceAlignmentMinorSave(actor, payload.side, payload.tier, payload.dc, true)
+      }
+    },
+    default: "roll"
+  }).render(true);
+}
+
+async function resolveForceAlignmentMinorSave(actor, side, tier, dc, chooseFail) {
+  let success = false;
+  let total = null;
+  const ability = forceAlignmentSaveAbility(side);
+  if (!chooseFail) {
+    const roll = typeof actor.rollAbilitySave === "function"
+      ? await actor.rollAbilitySave(ability, { flavor: `Force Alignment: Minor ${forceAlignmentSaveLabel(side)} ${romanNumeral(tier)} (DC ${dc})`, fastForward: true })
+      : await actor.rollAbilityTest(ability, { flavor: `Force Alignment: Minor ${forceAlignmentSaveLabel(side)} ${romanNumeral(tier)} (DC ${dc})`, fastForward: true });
+    total = rollTotal(roll);
+    success = total >= dc;
+  }
+
+  if (!game.user.isGM) {
+    game.socket.emit(`module.${MODULE_ID}`, {
+      type: "forceAlignmentMinorSaveResult",
+      payload: { actorUuid: actor.uuid, side, tier, dc, chooseFail, total, success }
+    });
+    return;
+  }
+  await recordForceAlignmentMinorSaveResult(actor, { side, tier, dc, chooseFail, total, success });
+}
+
+async function recordForceAlignmentMinorSaveResult(actor, payload) {
+  const state = forceAlignmentState(actor);
+  const label = forceAlignmentSaveLabel(payload.side);
+  const result = payload.chooseFail ? "chose to fail" : `${payload.success ? "succeeded" : "failed"}${payload.total === null ? "" : ` with ${payload.total}`}`;
+  const entry = forceAlignmentLogEntry({
+    kind: "save",
+    label: `Minor ${label} ${romanNumeral(payload.tier)} save`,
+    note: `${actor.name} ${result} against DC ${payload.dc}.`,
+    points: 0,
+    previous: state.value,
+    next: state.value
+  });
+  state.deedLog = [...(state.deedLog ?? []), entry];
+
+  if (!payload.success || payload.chooseFail) {
+    const roll = await new Roll("1d4").evaluate({ async: true });
+    const index = Math.max(0, Math.min(3, Number(roll.total ?? 1) - 1));
+    const trait = FORCE_ALIGNMENT_MINOR_TABLES[payload.side]?.[payload.tier]?.[index] ?? "Minor trait result unavailable.";
+    const traitEntry = {
+      id: foundry.utils.randomID(),
+      timestamp: new Date().toISOString(),
+      side: payload.side,
+      tier: payload.tier,
+      roll: Number(roll.total ?? index + 1),
+      text: trait
+    };
+    state.minorTraits = [...(state.minorTraits ?? []), traitEntry];
+    state.deedLog.push(forceAlignmentLogEntry({
+      kind: "trait",
+      label: `Minor ${label} ${romanNumeral(payload.tier)} trait`,
+      note: trait,
+      points: 0,
+      previous: state.value,
+      next: state.value
+    }));
+    await roll.toMessage({
+      speaker: ChatMessage.getSpeaker({ actor }),
+      flavor: `Force Alignment: Minor ${label} ${romanNumeral(payload.tier)} trait`
+    });
+  }
+
+  await setForceAlignmentState(actor, state);
 }
 
 async function recordDisturbanceCast(payload) {
@@ -575,6 +1020,146 @@ class HuntedDisturbanceLog extends Application {
   }
 }
 
+class ForceAlignmentPanel extends Application {
+  constructor(actor, options = {}) {
+    super(options);
+    this.actor = actor;
+  }
+
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: `${MODULE_ID}-force-alignment`,
+      title: "Force Alignment",
+      template: `modules/${MODULE_ID}/templates/force-alignment.html`,
+      width: 720,
+      height: 640,
+      resizable: true
+    });
+  }
+
+  get title() {
+    return `Force Alignment: ${this.actor?.name ?? "Actor"}`;
+  }
+
+  getData() {
+    const state = forceAlignmentState(this.actor);
+    const value = clampForceAlignment(state.value);
+    const side = forceAlignmentSide(value);
+    return {
+      actorName: this.actor?.name ?? "Actor",
+      value,
+      side,
+      color: forceAlignmentColor(value),
+      markerPercent: forceAlignmentMarkerPercent(value),
+      tierLabel: forceAlignmentTierLabel(value),
+      majorBenefit: forceAlignmentMajorBenefit(value),
+      isGM: game.user.isGM,
+      minorTraits: [...(state.minorTraits ?? [])].reverse().map((entry) => ({
+        ...entry,
+        when: new Date(entry.timestamp).toLocaleString(),
+        sideLabel: forceAlignmentSaveLabel(entry.side),
+        tierLabel: romanNumeral(entry.tier)
+      })),
+      deedLog: [...(state.deedLog ?? [])].reverse().map((entry) => ({
+        ...entry,
+        when: new Date(entry.timestamp).toLocaleString(),
+        pointsLabel: Number(entry.points ?? 0) > 0 ? `+${entry.points}` : String(entry.points ?? 0)
+      }))
+    };
+  }
+
+  activateListeners(html) {
+    super.activateListeners(html);
+    html.find("[data-action='adjust']").on("click", async (event) => {
+      if (!game.user.isGM) return;
+      const amount = Number(event.currentTarget.dataset.amount ?? 0);
+      await applyForceAlignmentDelta(this.actor, amount, {
+        kind: "manual",
+        label: "Manual GM adjustment",
+        note: amount > 0 ? "GM awarded 1 light point." : "GM awarded 1 dark point."
+      });
+      this.render();
+    });
+    html.find("[data-action='log-deed']").on("click", async () => {
+      if (!game.user.isGM) return;
+      const amount = Number(html.find("[name='deedAmount']").val() ?? 0);
+      const note = String(html.find("[name='deedNote']").val() ?? "").trim();
+      if (!amount || !note) {
+        ui.notifications.warn("Enter a nonzero point value and a deed note.");
+        return;
+      }
+      await applyForceAlignmentDelta(this.actor, amount, {
+        kind: "deed",
+        label: "GM deed adjustment",
+        note
+      });
+      this.render();
+    });
+  }
+}
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = String(value ?? "");
+  return div.innerHTML;
+}
+
+function actorFromSheetApp(app) {
+  return app?.actor ?? app?.document;
+}
+
+function renderForceAlignmentActorPanel(app, html) {
+  html = globalThis.jQuery && html instanceof jQuery ? html : $(html);
+  const actor = actorFromSheetApp(app);
+  if (!actor || !useModifiedActorSheet() || !isEnabled("force-alignment")) return;
+  if (!actorHasForceAlignmentSurface(actor)) return;
+  if (html.find?.(".sw5e-vr-force-alignment-sheet").length) return;
+
+  const state = forceAlignmentState(actor);
+  const value = clampForceAlignment(state.value);
+  const tier = forceAlignmentTierLabel(value);
+  const color = forceAlignmentColor(value);
+  const marker = forceAlignmentMarkerPercent(value);
+  const gmControls = game.user.isGM
+    ? `<button type="button" data-action="force-alignment-adjust" data-amount="1" title="Add 1 light point"><i class="fas fa-plus"></i></button><button type="button" data-action="force-alignment-adjust" data-amount="-1" title="Add 1 dark point"><i class="fas fa-minus"></i></button>`
+    : "";
+  const panel = $(`
+    <section class="sw5e-vr-force-alignment-sheet">
+      <div class="sw5e-vr-force-alignment-head">
+        <strong>Force Alignment</strong>
+        <span>${value > 0 ? "+" : ""}${value}</span>
+        <button type="button" data-action="force-alignment-open" title="Open Force Alignment details"><i class="fas fa-external-link-alt"></i></button>
+        ${gmControls}
+      </div>
+      <div class="sw5e-vr-force-alignment-bar" title="${escapeHtml(tier)}">
+        <span class="sw5e-vr-force-alignment-track"></span>
+        <span class="sw5e-vr-force-alignment-marker" style="left: ${marker}%; background: ${color};"></span>
+      </div>
+      <div class="sw5e-vr-force-alignment-foot">
+        <span>Dark</span>
+        <span>${escapeHtml(tier)}</span>
+        <span>Light</span>
+      </div>
+    </section>
+  `);
+
+  panel.find("[data-action='force-alignment-open']").on("click", () => new ForceAlignmentPanel(actor).render(true));
+  panel.find("[data-action='force-alignment-adjust']").on("click", async (event) => {
+    if (!game.user.isGM) return;
+    const amount = Number(event.currentTarget.dataset.amount ?? 0);
+    await applyForceAlignmentDelta(actor, amount, {
+      kind: "manual",
+      label: "Manual GM adjustment",
+      note: amount > 0 ? "GM awarded 1 light point from the actor sheet." : "GM awarded 1 dark point from the actor sheet."
+    });
+    app.render?.();
+  });
+
+  const target = html.find("form").first();
+  if (target.length) target.prepend(panel);
+  else html.prepend(panel);
+}
+
 function categoryLabel(category) {
   return category.replace(/(^|-)([a-z])/g, (_match, separator, letter) => `${separator ? " " : ""}${letter.toUpperCase()}`);
 }
@@ -647,8 +1232,23 @@ Hooks.once("init", () => {
 
 Hooks.once("ready", () => {
   game.socket.on(`module.${MODULE_ID}`, (message) => {
-    if (message?.type !== "huntedForcePowerCast" || !isResponsibleGM()) return;
-    recordDisturbanceCast(message.payload);
+    if (message?.type === "huntedForcePowerCast" && isResponsibleGM()) {
+      recordDisturbanceCast(message.payload);
+      return;
+    }
+    if (message?.type === "forceAlignmentCast" && isResponsibleGM()) {
+      recordForceAlignmentCast(message.payload);
+      return;
+    }
+    if (message?.type === "forceAlignmentMinorSaveRequest" && message.payload?.userId === game.user.id) {
+      showForceAlignmentMinorSaveDialog(message.payload);
+      return;
+    }
+    if (message?.type === "forceAlignmentMinorSaveResult" && isResponsibleGM()) {
+      fromUuid(message.payload?.actorUuid).then((actor) => {
+        if (actor) recordForceAlignmentMinorSaveResult(actor, message.payload);
+      });
+    }
   });
 
   game.modules.get(MODULE_ID).api = {
@@ -656,9 +1256,11 @@ Hooks.once("ready", () => {
     isEnabled,
     useModifiedActorSheet,
     disturbanceLedger,
+    forceAlignmentState,
     openConfig: () => new VariantRulesConfig().render(true),
     openReport: () => new VariantRulesReport().render(true),
     openHuntedLog: () => new HuntedDisturbanceLog().render(true),
+    openForceAlignment: (actor) => new ForceAlignmentPanel(actor).render(true),
     applyTacticalInitiative
   };
 });
@@ -683,6 +1285,7 @@ function usedItemFromHook(candidate) {
 async function handleUseItem(candidate) {
   const item = usedItemFromHook(candidate);
   await handleHuntedForcePowerCast(item);
+  await handleForceAlignmentPowerCast(item);
 
   if (item?.type === "consumable") {
     postEnabledRuleReminder("bonus-action-consumables", `${item.name} may be usable as a bonus action if its normal activation is not already a bonus action.`);
@@ -702,6 +1305,9 @@ Hooks.on("dnd5e.useItem", handleUseItem);
 Hooks.on("sw5e.useItem", handleUseItem);
 Hooks.on("dnd5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("sw5e.rollAbilityTest", handleRollAbilityTest);
+Hooks.on("renderActorSheet", renderForceAlignmentActorPanel);
+Hooks.on("renderActorSheetV2", renderForceAlignmentActorPanel);
+Hooks.on("renderActorSheet5eCharacter", renderForceAlignmentActorPanel);
 
 Hooks.on("renderCombatTracker", (_app, html) => {
   if (!game.user.isGM || !isEnabled("tactical-initiative")) return;

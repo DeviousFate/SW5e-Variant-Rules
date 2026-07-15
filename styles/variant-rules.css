@@ -97,3 +97,99 @@
 .sw5e-vr-hunted-log th {
   vertical-align: top;
 }
+
+.sw5e-vr-force-alignment-sheet {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+  margin: 0.5rem;
+  padding: 0.5rem;
+}
+
+.sw5e-vr-force-alignment-head,
+.sw5e-vr-force-alignment-summary,
+.sw5e-vr-force-alignment-foot,
+.sw5e-vr-force-alignment-deed {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sw5e-vr-force-alignment-head strong,
+.sw5e-vr-force-alignment-summary h2,
+.sw5e-vr-force-alignment-deed input[type="text"] {
+  flex: 1;
+}
+
+.sw5e-vr-force-alignment-head button {
+  flex: 0 0 28px;
+  height: 28px;
+  line-height: 1;
+  padding: 0;
+}
+
+.sw5e-vr-force-alignment-summary {
+  margin-bottom: 0.5rem;
+}
+
+.sw5e-vr-force-alignment-summary h2 {
+  margin: 0;
+}
+
+.sw5e-vr-force-alignment-summary strong {
+  font-size: 1.4rem;
+}
+
+.sw5e-vr-force-alignment-bar {
+  height: 18px;
+  margin: 0.45rem 0 0.25rem;
+  position: relative;
+}
+
+.sw5e-vr-force-alignment-track {
+  background: linear-gradient(90deg, #ff0000 0%, #a0a0a0 50%, #0080ff 100%);
+  border: 1px solid rgba(0, 0, 0, 0.32);
+  border-radius: 4px;
+  display: block;
+  height: 10px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 4px;
+}
+
+.sw5e-vr-force-alignment-marker {
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  display: block;
+  height: 18px;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  width: 18px;
+}
+
+.sw5e-vr-force-alignment-foot {
+  font-size: 0.78rem;
+  justify-content: space-between;
+}
+
+.sw5e-vr-force-alignment-gm {
+  border-top: 1px solid rgba(0, 0, 0, 0.14);
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+.sw5e-vr-force-alignment-deed input[type="number"] {
+  flex: 0 0 72px;
+}
+
+.sw5e-vr-force-alignment table {
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.sw5e-vr-force-alignment td,
+.sw5e-vr-force-alignment th {
+  vertical-align: top;
+}

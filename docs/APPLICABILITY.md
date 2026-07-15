@@ -9,6 +9,7 @@ Source reviewed: https://sw5e.com/rules/variantRules via the live `https://sw5ea
 - Tactical Initiative: GMs can select multiple combatant tokens and use the combat tracker button to set the group to the lowest initiative.
 - Hunted: Force power casts increase the casting user's Disturbance Point pool by the Force power level. At-wills add 0. Tech powers are ignored. The log records detected class, feat, and other Force-power sources from the actor's owned items.
 - Milestone Leveling: enabling the rule sets D&D5e `levelingMode` to `noxp`; disabling it sets the mode to `xp`.
+- Force Alignment: class-sourced light and dark Force power casts of 1st level or higher move the actor on a -100 to +100 alignment scale. First unique class-sourced cast grants points equal to power level; later casts of the same power grant 1 point. At-wills, universal powers, tech powers, and detectable non-class sources are ignored. The SWVR Actor Sheet panel shows the scale, GM adjustments, minor trait save prompts, and a deed/action log.
 
 ## Reminder Only
 
@@ -19,3 +20,7 @@ Source reviewed: https://sw5e.com/rules/variantRules via the live `https://sw5ea
 ## Manual or Not Mechanically Applicable
 
 The remaining variant rules either change character advancement data, item compendium data, campaign structure, narrative state, or core roll workflows too deeply to safely enforce from a small world module. They are still present in the GM configuration panel so the table can enable, document, and review them.
+
+## Known Limits
+
+- Force Alignment depends on Foundry item provenance. SW5e/D&D5e spell items do not always preserve whether a known power came from class progression, a feat, species trait, equipment, or another source. The automation requires a detected class/subclass Forcecasting source on the actor and filters obvious non-class sources when the item source metadata exposes them, but ambiguous powers may need GM correction through the manual adjustment/deed log.
