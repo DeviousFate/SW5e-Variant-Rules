@@ -8,6 +8,7 @@ Source reviewed: https://sw5e.com/rules/variantRules via the live `https://sw5ea
 - Strenuous Combat: deleting/ending a combat triggers Constitution saves for surviving combatants against DC 10 plus completed rounds and applies exhaustion on failure.
 - Tactical Initiative: GMs can select multiple combatant tokens and use the combat tracker button to set the group to the lowest initiative.
 - Hunted: Force power casts increase the casting user's Disturbance Point pool by the Force power level. At-wills add 0. Tech powers are ignored. The log records detected class, feat, and other Force-power sources from the actor's owned items.
+- Milestone Leveling: enabling the rule sets D&D5e `levelingMode` to `noxp`; disabling it sets the mode to `xp`.
 
 ## Reminder Only
 

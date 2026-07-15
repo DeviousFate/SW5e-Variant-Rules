@@ -32,7 +32,7 @@ const RULES = [
   rule("hunted", "Hunted", "theme", "Automated", "Each player has a Disturbance Point pool that increases when they cast Force powers by the power's level; at-wills count as level 0.", "Automated for SW5E Force powers only. Tech powers are ignored. The log records user, actor, power, disturbance gain, running total, and detected class/feat/other Force-power sources."),
   rule("invocation-versatility", "Invocation Versatility", "character", "Manual", "Characters can replace invocation choices under defined circumstances.", "This is level-up and retraining bookkeeping."),
   rule("longer-rests", "Longer Rests", "resting", "Manual", "Short and long rests take longer or have stricter availability.", "The system rest button can still be clicked; enforcement depends on calendar/timekeeping modules and GM pacing."),
-  rule("milestone-leveling", "Milestone Leveling", "character", "Manual", "Characters level by story milestones instead of experience totals.", "Foundry already lets GMs ignore XP; there is no extra mechanical hook needed."),
+  rule("milestone-leveling", "Milestone Leveling", "character", "Automated", "Characters level by story milestones instead of experience totals.", "When enabled, D&D5e Leveling Mode is set to Level Advancement without XP. When disabled, it is set to Experience Points."),
   rule("overlapping-features", "Overlapping Features", "character", "Manual", "Duplicate or overlapping features are resolved by replacement or non-stacking guidance.", "Feature equivalence and replacement choice are character-specific."),
   rule("replacing-powers", "Replacing Powers", "casting", "Manual", "Characters can replace known powers during advancement or retraining.", "This is a character-maintenance permission, not a runtime event."),
   rule("saving-throw-checks", "Saving Throw Checks", "checks", "Reminder", "Some ability checks can be rolled as saving throws when training or resistance is more appropriate.", "The module can remind GMs, but deciding check type remains contextual."),
@@ -59,6 +59,19 @@ function isEnabled(ruleId) {
 
 function setEnabledRules(values) {
   return game.settings.set(MODULE_ID, "enabledRules", values);
+}
+
+async function syncMilestoneLevelingSetting(isEnabledNow) {
+  if (!game.settings.settings.has("dnd5e.levelingMode")) {
+    ui.notifications.warn("D&D5e Leveling Mode setting was not found; Milestone Leveling could not sync.");
+    return;
+  }
+  const targetMode = isEnabledNow ? "noxp" : "xp";
+  const currentMode = game.settings.get("dnd5e", "levelingMode");
+  if (currentMode === targetMode) return;
+  await game.settings.set("dnd5e", "levelingMode", targetMode);
+  const label = isEnabledNow ? "Level Advancement without XP" : "Experience Points";
+  ui.notifications.info(`D&D5e Leveling Mode set to ${label}.`);
 }
 
 function disturbanceLedger() {
@@ -464,10 +477,14 @@ class VariantRulesConfig extends FormApplication {
   }
 
   async _updateObject(_event, formData) {
+    const previous = enabledRules();
     const enabled = {};
     for (const ruleData of RULES) enabled[ruleData.id] = Boolean(formData[ruleData.id]);
     await setEnabledRules(enabled);
     await game.settings.set(MODULE_ID, "chatReminders", Boolean(formData.chatReminders));
+    if (previous["milestone-leveling"] !== enabled["milestone-leveling"]) {
+      await syncMilestoneLevelingSetting(enabled["milestone-leveling"]);
+    }
   }
 
   activateListeners(html) {
