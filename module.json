@@ -9,14 +9,21 @@
     }
   ],
   "compatibility": {
-    "minimum": "10",
-    "verified": "12"
+    "minimum": "13",
+    "verified": "13"
   },
   "relationships": {
     "systems": [
       {
         "id": "sw5e",
         "type": "system"
+      },
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "5.2.5"
+        }
       }
     ]
   },
