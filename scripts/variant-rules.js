@@ -109,7 +109,7 @@ const RULES = [
   rule("compound-advantage", "Compound Advantage", "checks", "Manual", "Multiple sources of advantage and disadvantage can stack instead of canceling to a single state.", "Core roll dialogs and system roll workflows would need deep replacement to avoid double-counting or breaking modules."),
   rule("compound-checks", "Compound Checks", "checks", "Manual", "Multiple checks or contributors can combine into a broader result.", "The applicable participants and result math are GM-adjudicated per scene."),
   rule("critical-saving-throws", "Critical Saving Throws", "checks", "Manual", "Natural 1s and 20s on saving throws have stronger consequences.", "The consequence depends on the power, effect, and save context."),
-  rule("crueler-criticals", "Crueler Criticals", "combat", "Manual", "Critical hits become more dangerous than the default damage handling.", "Damage rolls vary heavily by system version and module workflow, so automatic mutation is unsafe."),
+  rule("crueler-criticals", "Crueler Criticals", "combat", "Automated", "Critical hits maximize one set of damage dice and roll the additional critical dice.", "When enabled, D&D5e Critical Damage Max Dice is turned on. When disabled, it is turned off."),
   rule("defense-rolls", "Defense Rolls", "combat", "Manual", "Players roll defenses instead of enemies rolling attacks against static defenses.", "This inverts the attack workflow and cannot be safely layered over normal SW5e attack resolution."),
   rule("destiny", "Destiny", "character", "Manual", "Characters use destiny-based rewards and spend options.", "Destiny awards and spend timing are narrative campaign management."),
   rule("dismemberment", "Dismemberment", "combat", "Manual", "Major injuries can remove or impair limbs under severe combat outcomes.", "The rule is injury adjudication and character-state narration, not a single mechanical flag."),
@@ -168,6 +168,18 @@ async function syncMilestoneLevelingSetting(isEnabledNow) {
   await game.settings.set("dnd5e", "levelingMode", targetMode);
   const label = isEnabledNow ? "Level Advancement without XP" : "Experience Points";
   ui.notifications.info(`D&D5e Leveling Mode set to ${label}.`);
+}
+
+async function syncCruelerCriticalsSetting(isEnabledNow) {
+  if (!game.settings.settings.has("dnd5e.criticalDamageMaxDice")) {
+    ui.notifications.warn("D&D5e Critical Damage Max Dice setting was not found; Crueler Criticals could not sync.");
+    return;
+  }
+  const current = Boolean(game.settings.get("dnd5e", "criticalDamageMaxDice"));
+  if (current === Boolean(isEnabledNow)) return;
+  await game.settings.set("dnd5e", "criticalDamageMaxDice", Boolean(isEnabledNow));
+  const label = isEnabledNow ? "enabled" : "disabled";
+  ui.notifications.info(`D&D5e Critical Damage Max Dice ${label} for Crueler Criticals.`);
 }
 
 function disturbanceLedger() {
@@ -965,6 +977,9 @@ class VariantRulesConfig extends FormApplication {
     if (previous["milestone-leveling"] !== enabled["milestone-leveling"]) {
       await syncMilestoneLevelingSetting(enabled["milestone-leveling"]);
     }
+    if (previous["crueler-criticals"] !== enabled["crueler-criticals"]) {
+      await syncCruelerCriticalsSetting(enabled["crueler-criticals"]);
+    }
   }
 
   activateListeners(html) {
@@ -1324,6 +1339,8 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
+  if (game.user.isGM && isEnabled("crueler-criticals")) syncCruelerCriticalsSetting(true);
+
   game.socket.on(`module.${MODULE_ID}`, (message) => {
     if (message?.type === "huntedForcePowerCast" && isResponsibleGM()) {
       recordDisturbanceCast(message.payload);
