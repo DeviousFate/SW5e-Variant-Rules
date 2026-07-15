@@ -1,5 +1,6 @@
 const MODULE_ID = "sw5e-variant-rules";
 const SOURCE_URL = "https://sw5e.com/rules/variantRules";
+const RECENT_HUNTED_CASTS = new Map();
 
 const RULES = [
   rule("asi-feat", "ASI and a Feat", "character", "Manual", "Characters receiving an Ability Score Improvement can take +1 to one ability score and a feat.", "Foundry can store the final ability score and feat item, but SW5e level-up choices and balance decisions are table-managed."),
@@ -28,7 +29,7 @@ const RULES = [
   rule("force-tech-prowess", "Force and Tech Prowess", "character", "Manual", "Characters can develop broader force or tech capability.", "This is feat/feature and power-list progression data."),
   rule("force-bond", "Force-Bond", "theme", "Manual", "Characters can share a force-linked bond with narrative and situational effects.", "The benefit is intentionally relationship- and scene-dependent."),
   rule("gestalt-dichotomous", "Gestalt and Dichotomous Characters", "character", "Manual", "Characters can progress through multiple class structures in nonstandard ways.", "This requires alternate character-builder progression and cannot be inferred from an actor sheet."),
-  rule("hunted", "Hunted", "theme", "Manual", "A character or group gains ongoing opposition as a campaign pressure.", "This is adventure structure and encounter design."),
+  rule("hunted", "Hunted", "theme", "Automated", "Each player has a Disturbance Point pool that increases when they cast Force powers by the power's level; at-wills count as level 0.", "Automated for SW5E Force powers only. Tech powers are ignored. The log records user, actor, power, disturbance gain, running total, and detected class/feat/other Force-power sources."),
   rule("invocation-versatility", "Invocation Versatility", "character", "Manual", "Characters can replace invocation choices under defined circumstances.", "This is level-up and retraining bookkeeping."),
   rule("longer-rests", "Longer Rests", "resting", "Manual", "Short and long rests take longer or have stricter availability.", "The system rest button can still be clicked; enforcement depends on calendar/timekeeping modules and GM pacing."),
   rule("milestone-leveling", "Milestone Leveling", "character", "Manual", "Characters level by story milestones instead of experience totals.", "Foundry already lets GMs ignore XP; there is no extra mechanical hook needed."),
@@ -58,6 +59,14 @@ function isEnabled(ruleId) {
 
 function setEnabledRules(values) {
   return game.settings.set(MODULE_ID, "enabledRules", values);
+}
+
+function disturbanceLedger() {
+  return foundry.utils.deepClone(game.settings.get(MODULE_ID, "disturbanceLedger") ?? {});
+}
+
+function setDisturbanceLedger(values) {
+  return game.settings.set(MODULE_ID, "disturbanceLedger", values);
 }
 
 function getPropertyCompat(document, path) {
@@ -108,6 +117,193 @@ async function rollConSave(actor, dc, flavor) {
 
 function rollTotal(roll) {
   return Number(roll?.total ?? 0);
+}
+
+function isResponsibleGM() {
+  if (!game.user.isGM) return false;
+  const activeGms = game.users.filter((user) => user.active && user.isGM).sort((a, b) => a.id.localeCompare(b.id));
+  return activeGms[0]?.id === game.user.id;
+}
+
+function resolveUserForActor(actor, fallbackUserId = game.user.id) {
+  if (!actor) return game.users.get(fallbackUserId) ?? game.user;
+  const activeOwners = game.users
+    .filter((user) => user.active && !user.isGM && actor.testUserPermission?.(user, "OWNER"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return activeOwners[0] ?? game.users.get(fallbackUserId) ?? game.user;
+}
+
+function itemDescriptionText(item) {
+  const candidates = [
+    item?.system?.description?.value,
+    item?.system?.description?.chat,
+    item?.system?.unidentified?.description,
+    item?.system?.description
+  ];
+  return candidates.filter((value) => typeof value === "string").join(" ");
+}
+
+function stripHtml(value) {
+  const div = document.createElement("div");
+  div.innerHTML = String(value ?? "");
+  return div.textContent || div.innerText || "";
+}
+
+function hasForcePowerGrantText(item) {
+  const text = `${item?.name ?? ""} ${stripHtml(itemDescriptionText(item))}`.toLowerCase();
+  return /\bforce[-\s]?(casting|powers?|points?)\b/.test(text)
+    || /\bforce[-\s]?sensitive\b/.test(text)
+    || /\bforce[-\s]?adept\b/.test(text)
+    || /\bforce[-\s]?affinity\b/.test(text);
+}
+
+function isForcePowerItem(item) {
+  if (!item || item.type !== "spell") return false;
+  const school = item.system?.school;
+  if (["lgt", "drk", "uni"].includes(school)) return true;
+  if (school === "tec") return false;
+
+  const consumeTarget = item.system?.consume?.target;
+  if (typeof consumeTarget === "string" && /(^|\.)powercasting\.force\.points\.value$/.test(consumeTarget)) return true;
+
+  const activityTargets = Object.values(item.system?.activities ?? {}).flatMap((activity) => activity?.consumption?.targets ?? []);
+  return activityTargets.some((target) => target?.type === "attribute" && /(^|\.)powercasting\.force\.points\.value$/.test(target?.target ?? ""));
+}
+
+function forcePowerLevel(item) {
+  const level = Number(item?.system?.level ?? item?.system?.spellLevel ?? 0);
+  return Number.isFinite(level) && level > 0 ? level : 0;
+}
+
+function itemSourceLabel(item) {
+  const values = [
+    item?.system?.source?.custom,
+    item?.system?.source?.book,
+    item?.system?.source,
+    item?.flags?.core?.sourceId,
+    item?.flags?.dnd5e?.sourceId,
+    item?.flags?.sw5e?.sourceId,
+    item?.pack
+  ].filter(Boolean);
+  return values.map((value) => typeof value === "string" ? value : JSON.stringify(value)).join("; ");
+}
+
+function itemTypeLabel(item) {
+  const labels = {
+    class: "Class",
+    subclass: "Subclass",
+    feat: "Feat",
+    background: "Background",
+    race: "Species",
+    equipment: "Equipment",
+    consumable: "Consumable",
+    loot: "Other"
+  };
+  return labels[item?.type] ?? item?.type ?? "Other";
+}
+
+function detectForcePowerSources(actor, castItem) {
+  const classes = [];
+  const feats = [];
+  const other = [];
+  const nativeForceClasses = new Set(["consular", "guardian", "sentinel"]);
+
+  for (const item of actor?.items ?? []) {
+    const name = item.name ?? "Unnamed Item";
+    const lowerName = name.toLowerCase();
+    const grantsForce = hasForcePowerGrantText(item);
+    if (item.type === "class" && (nativeForceClasses.has(lowerName) || grantsForce)) classes.push(name);
+    else if (item.type === "subclass" && grantsForce) classes.push(name);
+    else if (item.type === "feat" && grantsForce) feats.push(name);
+    else if (grantsForce && item.id !== castItem?.id) other.push(`${itemTypeLabel(item)}: ${name}`);
+  }
+
+  const castItemSource = itemSourceLabel(castItem);
+  if (castItemSource) other.push(`Power source: ${castItemSource}`);
+
+  return {
+    classes: [...new Set(classes)],
+    feats: [...new Set(feats)],
+    other: [...new Set(other)]
+  };
+}
+
+function summarizeForcePowerSources(sources = {}) {
+  const parts = [];
+  if (sources.classes?.length) parts.push(`Class/Subclass: ${sources.classes.join(", ")}`);
+  if (sources.feats?.length) parts.push(`Feat: ${sources.feats.join(", ")}`);
+  if (sources.other?.length) parts.push(`Other: ${sources.other.join(", ")}`);
+  return parts.join(" | ") || "No Force-power-granting class, feat, or other source detected on the actor.";
+}
+
+async function recordDisturbanceCast(payload) {
+  if (!game.user.isGM) return;
+  const ledger = disturbanceLedger();
+  const userId = payload.userId ?? game.user.id;
+  const user = game.users.get(userId);
+  const current = ledger[userId] ?? {
+    userId,
+    userName: user?.name ?? payload.userName ?? "Unknown User",
+    total: 0,
+    entries: []
+  };
+  const gain = Number(payload.points ?? 0);
+  const entry = {
+    id: foundry.utils.randomID(),
+    timestamp: new Date().toISOString(),
+    actorId: payload.actorId,
+    actorName: payload.actorName,
+    itemId: payload.itemId,
+    itemName: payload.itemName,
+    level: Number(payload.level ?? 0),
+    points: gain,
+    totalAfter: Number(current.total ?? 0) + gain,
+    sources: payload.sources ?? { classes: [], feats: [], other: [] }
+  };
+
+  current.userName = user?.name ?? current.userName;
+  current.total = entry.totalAfter;
+  current.entries = [...(current.entries ?? []), entry].slice(-200);
+  ledger[userId] = current;
+  await setDisturbanceLedger(ledger);
+
+  if (game.settings.get(MODULE_ID, "chatReminders")) {
+    ChatMessage.create({
+      speaker: { alias: "SW5e Variant Rules" },
+      whisper: ChatMessage.getWhisperRecipients("GM"),
+      content: `<p><strong>Hunted:</strong> ${entry.actorName} cast ${entry.itemName} (level ${entry.level}), adding ${entry.points} Disturbance Point(s) to ${current.userName}. Total: ${current.total}.</p><p><strong>Detected source(s):</strong> ${summarizeForcePowerSources(entry.sources)}</p>`
+    });
+  }
+}
+
+async function handleHuntedForcePowerCast(item) {
+  if (!isEnabled("hunted") || !isForcePowerItem(item)) return;
+  const dedupeKey = `${game.user.id}:${item.uuid ?? item.id}:${item.actor?.id ?? ""}`;
+  const now = Date.now();
+  const recent = RECENT_HUNTED_CASTS.get(dedupeKey);
+  if (recent && now - recent < 1500) return;
+  RECENT_HUNTED_CASTS.set(dedupeKey, now);
+  for (const [key, timestamp] of RECENT_HUNTED_CASTS.entries()) {
+    if (now - timestamp > 5000) RECENT_HUNTED_CASTS.delete(key);
+  }
+
+  const actor = item.actor;
+  const user = resolveUserForActor(actor, game.user.id);
+  const level = forcePowerLevel(item);
+  const payload = {
+    userId: user.id,
+    userName: user.name,
+    actorId: actor?.id,
+    actorName: actor?.name ?? "Unknown Actor",
+    itemId: item.id,
+    itemName: item.name,
+    level,
+    points: level,
+    sources: detectForcePowerSources(actor, item)
+  };
+
+  if (game.user.isGM) await recordDisturbanceCast(payload);
+  else game.socket.emit(`module.${MODULE_ID}`, { type: "huntedForcePowerCast", payload });
 }
 
 async function addExhaustion(actor, amount = 1) {
@@ -283,6 +479,7 @@ class VariantRulesConfig extends FormApplication {
       html.find("input[data-rule-id]").prop("checked", false);
     });
     html.find("[data-action='report']").on("click", () => new VariantRulesReport().render(true));
+    html.find("[data-action='hunted-log']").on("click", () => new HuntedDisturbanceLog().render(true));
   }
 }
 
@@ -308,6 +505,50 @@ class VariantRulesReport extends Application {
         badgeClass: automationClass(ruleData.automation)
       }))
     };
+  }
+}
+
+class HuntedDisturbanceLog extends Application {
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: `${MODULE_ID}-hunted-log`,
+      title: "Hunted Disturbance Log",
+      template: `modules/${MODULE_ID}/templates/hunted-log.html`,
+      width: 860,
+      height: 720,
+      resizable: true
+    });
+  }
+
+  getData() {
+    const users = Object.values(disturbanceLedger()).sort((a, b) => String(a.userName).localeCompare(String(b.userName)));
+    return {
+      users: users.map((user) => ({
+        ...user,
+        entries: [...(user.entries ?? [])].reverse().map((entry) => ({
+          ...entry,
+          sourceSummary: summarizeForcePowerSources(entry.sources),
+          when: new Date(entry.timestamp).toLocaleString()
+        }))
+      }))
+    };
+  }
+
+  activateListeners(html) {
+    super.activateListeners(html);
+    html.find("[data-action='reset-user']").on("click", async (event) => {
+      const userId = event.currentTarget.dataset.userId;
+      const ledger = disturbanceLedger();
+      if (!ledger[userId]) return;
+      ledger[userId].total = 0;
+      ledger[userId].entries = [];
+      await setDisturbanceLedger(ledger);
+      this.render();
+    });
+    html.find("[data-action='reset-all']").on("click", async () => {
+      await setDisturbanceLedger({});
+      this.render();
+    });
   }
 }
 
@@ -344,6 +585,14 @@ Hooks.once("init", () => {
     default: true
   });
 
+  game.settings.register(MODULE_ID, "disturbanceLedger", {
+    name: "Hunted Disturbance Ledger",
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {}
+  });
+
   game.settings.registerMenu(MODULE_ID, "config", {
     name: "Configure Variant Rules",
     label: "Configure Rules",
@@ -352,14 +601,30 @@ Hooks.once("init", () => {
     type: VariantRulesConfig,
     restricted: true
   });
+
+  game.settings.registerMenu(MODULE_ID, "huntedLog", {
+    name: "Hunted Disturbance Log",
+    label: "Open Log",
+    hint: "Review and reset user Disturbance Points generated by Force power casting.",
+    icon: "fas fa-wave-square",
+    type: HuntedDisturbanceLog,
+    restricted: true
+  });
 });
 
 Hooks.once("ready", () => {
+  game.socket.on(`module.${MODULE_ID}`, (message) => {
+    if (message?.type !== "huntedForcePowerCast" || !isResponsibleGM()) return;
+    recordDisturbanceCast(message.payload);
+  });
+
   game.modules.get(MODULE_ID).api = {
     rules: RULES,
     isEnabled,
+    disturbanceLedger,
     openConfig: () => new VariantRulesConfig().render(true),
     openReport: () => new VariantRulesReport().render(true),
+    openHuntedLog: () => new HuntedDisturbanceLog().render(true),
     applyTacticalInitiative
   };
 });
@@ -377,7 +642,14 @@ Hooks.on("createCombat", () => {
   postEnabledRuleReminder("strenuous-combat", "When this combat ends, surviving combatants will roll Constitution saves for exhaustion.");
 });
 
-function handleUseItem(item) {
+function usedItemFromHook(candidate) {
+  return candidate?.item ?? candidate?.subject?.item ?? candidate;
+}
+
+async function handleUseItem(candidate) {
+  const item = usedItemFromHook(candidate);
+  await handleHuntedForcePowerCast(item);
+
   if (item?.type === "consumable") {
     postEnabledRuleReminder("bonus-action-consumables", `${item.name} may be usable as a bonus action if its normal activation is not already a bonus action.`);
   }

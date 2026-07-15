@@ -1,0 +1,50 @@
+<section class="sw5e-vr-hunted-log">
+  <div class="sw5e-vr-actions">
+    <button type="button" data-action="reset-all"><i class="fas fa-trash"></i> Reset All</button>
+  </div>
+
+  {{#if users.length}}
+    {{#each users}}
+      <section class="sw5e-vr-hunted-user">
+        <header>
+          <h2>{{userName}}</h2>
+          <strong>{{total}} Disturbance Point(s)</strong>
+          <button type="button" data-action="reset-user" data-user-id="{{userId}}"><i class="fas fa-undo"></i> Reset User</button>
+        </header>
+
+        {{#if entries.length}}
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Actor</th>
+                <th>Force Power</th>
+                <th>Level</th>
+                <th>Gain</th>
+                <th>Total</th>
+                <th>Detected Source(s)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each entries}}
+                <tr>
+                  <td>{{when}}</td>
+                  <td>{{actorName}}</td>
+                  <td>{{itemName}}</td>
+                  <td>{{level}}</td>
+                  <td>{{points}}</td>
+                  <td>{{totalAfter}}</td>
+                  <td>{{sourceSummary}}</td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
+        {{else}}
+          <p class="notes">No Force power casts logged for this user since the last reset.</p>
+        {{/if}}
+      </section>
+    {{/each}}
+  {{else}}
+    <p class="notes">No Hunted Disturbance Points have been logged yet.</p>
+  {{/if}}
+</section>
