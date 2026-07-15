@@ -416,10 +416,6 @@ function forceAlignmentMarkerPercent(value) {
   return ((clampForceAlignment(value) + 100) / 200) * 100;
 }
 
-function forceAlignmentMarkerTopPercent(value) {
-  return 100 - forceAlignmentMarkerPercent(value);
-}
-
 function interpolateColor(start, end, ratio) {
   const parse = (hex) => hex.replace("#", "").match(/.{2}/g).map((part) => parseInt(part, 16));
   const [sr, sg, sb] = parse(start);
@@ -1084,7 +1080,6 @@ class ForceAlignmentPanel extends Application {
       side,
       color: forceAlignmentColor(value),
       markerPercent: forceAlignmentMarkerPercent(value),
-      markerTopPercent: forceAlignmentMarkerTopPercent(value),
       tierLabel: forceAlignmentTierLabel(value),
       majorBenefit: forceAlignmentMajorBenefit(value),
       isGM: game.user.isGM,
