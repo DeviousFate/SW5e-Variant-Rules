@@ -397,6 +397,35 @@ function summarizeForcePowerSources(sources = {}) {
   return parts.join(" | ") || "No Force-power-granting class, feat, or other source detected on the actor.";
 }
 
+function disturbancePoolsForActor(actor) {
+  if (!game.user.isGM || !actor) return [];
+  const ledger = disturbanceLedger();
+  const pools = new Map();
+
+  const owners = game.users
+    .filter((user) => !user.isGM && actor.testUserPermission?.(user, "OWNER"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  for (const user of owners) {
+    pools.set(user.id, {
+      userId: user.id,
+      userName: user.name,
+      total: Number(ledger[user.id]?.total ?? 0)
+    });
+  }
+
+  for (const entry of Object.values(ledger)) {
+    const hasActorEntry = (entry.entries ?? []).some((cast) => cast.actorId === actor.id);
+    if (!hasActorEntry) continue;
+    pools.set(entry.userId, {
+      userId: entry.userId,
+      userName: game.users.get(entry.userId)?.name ?? entry.userName ?? "Unknown User",
+      total: Number(entry.total ?? 0)
+    });
+  }
+
+  return [...pools.values()].sort((a, b) => String(a.userName).localeCompare(String(b.userName)));
+}
+
 function tokenElevation(token) {
   const elevation = Number(token?.document?.elevation ?? token?.elevation ?? 0);
   return Number.isFinite(elevation) ? elevation : 0;
@@ -1348,6 +1377,7 @@ class ForceAlignmentPanel extends Application {
       tierLabel: forceAlignmentTierLabel(value),
       majorBenefit: forceAlignmentMajorBenefit(value),
       isGM: game.user.isGM,
+      disturbancePools: disturbancePoolsForActor(this.actor),
       minorTraits: [...(state.minorTraits ?? [])].reverse().map((entry) => ({
         ...entry,
         when: new Date(entry.timestamp).toLocaleString(),
