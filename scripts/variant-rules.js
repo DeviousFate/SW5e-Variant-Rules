@@ -1154,13 +1154,24 @@ function ownText(element) {
     .join(" ");
 }
 
+function normalizedElementText(element) {
+  return String(element?.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+function isCompactSheetBlock(element) {
+  const rect = element?.getBoundingClientRect?.();
+  if (!rect) return true;
+  return rect.width > 20 && rect.width <= 320 && rect.height > 8 && rect.height <= 90;
+}
+
 function closestCompactSheetBlock(element, pattern) {
   let block = $(element);
   for (let i = 0; i < 5; i++) {
     const parent = block.parent();
     if (!parent.length || parent.is("form, .window-content")) break;
-    const text = parent.text().replace(/\s+/g, " ").trim();
-    if (!pattern.test(text) || text.length > 140) break;
+    const parentElement = parent[0];
+    const text = normalizedElementText(parentElement);
+    if (!pattern.test(text) || text.length > 90 || !isCompactSheetBlock(parentElement)) break;
     block = parent;
   }
   return block;
@@ -1169,29 +1180,33 @@ function closestCompactSheetBlock(element, pattern) {
 function findSheetTextBlock(html, pattern) {
   const matches = html.find("*").filter((_index, element) => {
     if ($(element).closest(".sw5e-vr-force-alignment-sheet").length) return false;
-    const text = ownText(element) || ($(element).children().length <= 2 ? element.textContent : "");
-    return pattern.test(String(text ?? "").replace(/\s+/g, " ").trim());
+    const text = ownText(element) || ($(element).children().length <= 2 ? normalizedElementText(element) : "");
+    if (!pattern.test(String(text ?? "").replace(/\s+/g, " ").trim())) return false;
+    return isCompactSheetBlock(element);
+  }).toArray().sort((a, b) => {
+    const ar = a.getBoundingClientRect?.() ?? { top: 0, left: 0 };
+    const br = b.getBoundingClientRect?.() ?? { top: 0, left: 0 };
+    return (ar.top - br.top) || (ar.left - br.left);
   });
-  if (!matches.length) return null;
-  return closestCompactSheetBlock(matches[0], pattern);
+  for (const match of matches) {
+    const block = closestCompactSheetBlock(match, pattern);
+    if (block?.length && isCompactSheetBlock(block[0])) return block;
+  }
+  return null;
 }
 
 function insertForceAlignmentSheetPanel(html, panel) {
-  const forcePoints = findSheetTextBlock(html, /force points/i);
+  const forcePoints = findSheetTextBlock(html, /force\s*points/i);
   if (forcePoints?.length) {
     forcePoints.after(panel);
     return;
   }
 
-  const hitDice = findSheetTextBlock(html, /hit dice/i);
+  const hitDice = findSheetTextBlock(html, /hit\s*dice/i);
   if (hitDice?.length) {
     hitDice.before(panel);
     return;
   }
-
-  const resourceColumn = html.find(".resources, .attributes, .main-content, .sheet-body").first();
-  if (resourceColumn.length) resourceColumn.prepend(panel);
-  else html.prepend(panel);
 }
 
 function renderForceAlignmentActorPanel(app, html) {
@@ -1202,7 +1217,7 @@ function renderForceAlignmentActorPanel(app, html) {
   const host = app?.element
     ? (globalThis.jQuery && app.element instanceof jQuery ? app.element : $(app.element))
     : html.closest(".app");
-  host.find(".sw5e-vr-force-alignment-sheet").remove();
+  host?.find?.(".sw5e-vr-force-alignment-sheet").remove();
   html.find(".sw5e-vr-force-alignment-sheet").remove();
 
   const state = forceAlignmentState(actor);
