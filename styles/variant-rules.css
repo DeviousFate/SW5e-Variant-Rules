@@ -118,6 +118,10 @@
   flex: 1;
 }
 
+.sw5e-vr-force-alignment-deed input[type="text"] {
+  min-width: 0;
+}
+
 .sw5e-vr-force-alignment-head {
   font-size: 0.72rem;
   line-height: 1;
@@ -267,7 +271,15 @@
 }
 
 .sw5e-vr-force-alignment-deed input[type="number"] {
-  flex: 0 0 72px;
+  flex: 0 0 58px;
+}
+
+.sw5e-vr-force-alignment-deed button[data-action="log-deed"] {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+  width: auto;
 }
 
 .sw5e-vr-force-alignment table {
