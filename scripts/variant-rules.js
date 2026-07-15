@@ -57,6 +57,10 @@ function isEnabled(ruleId) {
   return Boolean(enabledRules()[ruleId]);
 }
 
+function useModifiedActorSheet() {
+  return Boolean(game.settings.get(MODULE_ID, "useModifiedActorSheet"));
+}
+
 function setEnabledRules(values) {
   return game.settings.set(MODULE_ID, "enabledRules", values);
 }
@@ -472,6 +476,7 @@ class VariantRulesConfig extends FormApplication {
     return {
       sourceUrl: SOURCE_URL,
       chatReminders: game.settings.get(MODULE_ID, "chatReminders"),
+      useModifiedActorSheet: useModifiedActorSheet(),
       categories
     };
   }
@@ -482,6 +487,7 @@ class VariantRulesConfig extends FormApplication {
     for (const ruleData of RULES) enabled[ruleData.id] = Boolean(formData[ruleData.id]);
     await setEnabledRules(enabled);
     await game.settings.set(MODULE_ID, "chatReminders", Boolean(formData.chatReminders));
+    await game.settings.set(MODULE_ID, "useModifiedActorSheet", Boolean(formData.useModifiedActorSheet));
     if (previous["milestone-leveling"] !== enabled["milestone-leveling"]) {
       await syncMilestoneLevelingSetting(enabled["milestone-leveling"]);
     }
@@ -602,6 +608,16 @@ Hooks.once("init", () => {
     default: true
   });
 
+  game.settings.register(MODULE_ID, "useModifiedActorSheet", {
+    name: "Use SWVR Actor Sheet",
+    hint: "Enable the SWVR Actor Sheet when it is implemented.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false,
+    requiresReload: true
+  });
+
   game.settings.register(MODULE_ID, "disturbanceLedger", {
     name: "Hunted Disturbance Ledger",
     scope: "world",
@@ -638,6 +654,7 @@ Hooks.once("ready", () => {
   game.modules.get(MODULE_ID).api = {
     rules: RULES,
     isEnabled,
+    useModifiedActorSheet,
     disturbanceLedger,
     openConfig: () => new VariantRulesConfig().render(true),
     openReport: () => new VariantRulesReport().render(true),
