@@ -1151,7 +1151,11 @@ function renderForceAlignmentActorPanel(app, html) {
   const actor = actorFromSheetApp(app);
   if (!actor || !useModifiedActorSheet() || !isEnabled("force-alignment")) return;
   if (!actorHasForceAlignmentSurface(actor)) return;
-  if (html.find?.(".sw5e-vr-force-alignment-sheet").length) return;
+  const host = app?.element
+    ? (globalThis.jQuery && app.element instanceof jQuery ? app.element : $(app.element))
+    : html.closest(".app");
+  const target = host?.length ? host : html;
+  target.find(".sw5e-vr-force-alignment-sheet").remove();
 
   const state = forceAlignmentState(actor);
   const value = clampForceAlignment(state.value);
@@ -1190,8 +1194,7 @@ function renderForceAlignmentActorPanel(app, html) {
     app.render?.();
   });
 
-  html.css("position", "relative");
-  html.append(panel);
+  target.append(panel);
 }
 
 function categoryLabel(category) {
