@@ -99,10 +99,21 @@
 }
 
 .sw5e-vr-force-alignment-sheet {
-  border: 1px solid rgba(0, 0, 0, 0.18);
+  align-items: center;
+  background: rgba(14, 16, 20, 0.9);
+  border: 1px solid rgba(205, 213, 224, 0.35);
   border-radius: 6px;
-  margin: 0.5rem;
-  padding: 0.5rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  color: #f0f2f5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.35rem 0.25rem;
+  position: absolute;
+  right: 6px;
+  top: 52px;
+  width: 54px;
+  z-index: 50;
 }
 
 .sw5e-vr-force-alignment-head,
@@ -114,17 +125,9 @@
   gap: 0.5rem;
 }
 
-.sw5e-vr-force-alignment-head strong,
 .sw5e-vr-force-alignment-summary h2,
 .sw5e-vr-force-alignment-deed input[type="text"] {
   flex: 1;
-}
-
-.sw5e-vr-force-alignment-head button {
-  flex: 0 0 28px;
-  height: 28px;
-  line-height: 1;
-  padding: 0;
 }
 
 .sw5e-vr-force-alignment-summary {
@@ -139,39 +142,108 @@
   font-size: 1.4rem;
 }
 
-.sw5e-vr-force-alignment-bar {
-  height: 18px;
-  margin: 0.45rem 0 0.25rem;
-  position: relative;
+.sw5e-vr-force-alignment-display {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.5rem auto;
+  width: 84px;
 }
 
-.sw5e-vr-force-alignment-track {
-  background: linear-gradient(90deg, #ff0000 0%, #a0a0a0 50%, #0080ff 100%);
-  border: 1px solid rgba(0, 0, 0, 0.32);
+.sw5e-vr-force-alignment-crest {
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 4px;
-  display: block;
-  height: 10px;
-  left: 0;
-  position: absolute;
-  right: 0;
-  top: 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  padding: 0.25rem 0.3rem;
+  text-align: center;
 }
 
-.sw5e-vr-force-alignment-marker {
+.sw5e-vr-force-alignment-light {
+  background: linear-gradient(180deg, rgba(0, 128, 255, 0.85), rgba(0, 65, 122, 0.85));
+  color: #eef8ff;
+}
+
+.sw5e-vr-force-alignment-dark {
+  background: linear-gradient(180deg, rgba(120, 0, 0, 0.85), rgba(255, 0, 0, 0.82));
+  color: #fff0f0;
+}
+
+.sw5e-vr-force-alignment-spine {
+  background: linear-gradient(90deg, #1a1d22, #5d6470 48%, #16191e);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.8);
+  height: 220px;
+  position: relative;
+  width: 28px;
+}
+
+.sw5e-vr-force-alignment-sheet .sw5e-vr-force-alignment-spine {
+  height: 150px;
+  width: 22px;
+}
+
+.sw5e-vr-force-alignment-vertical-track {
+  background: linear-gradient(180deg, #0080ff 0%, #a0a0a0 50%, #ff0000 100%);
+  border-radius: 6px;
+  bottom: 7px;
+  display: block;
+  left: 50%;
+  position: absolute;
+  top: 7px;
+  transform: translateX(-50%);
+  width: 10px;
+}
+
+.sw5e-vr-force-alignment-centerline {
+  background: rgba(255, 255, 255, 0.9);
+  display: block;
+  height: 2px;
+  left: 4px;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+}
+
+.sw5e-vr-force-alignment-vertical-marker {
   border: 2px solid #fff;
-  border-radius: 50%;
+  border-radius: 3px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
   display: block;
   height: 18px;
+  left: 50%;
   position: absolute;
-  top: 0;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%) rotate(45deg);
   width: 18px;
 }
 
 .sw5e-vr-force-alignment-foot {
   font-size: 0.78rem;
-  justify-content: space-between;
+  justify-content: center;
+  text-align: center;
+}
+
+.sw5e-vr-force-alignment-readout {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.sw5e-vr-force-alignment-readout strong {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.sw5e-vr-force-alignment-readout button {
+  height: 24px;
+  line-height: 1;
+  padding: 0;
+  width: 28px;
 }
 
 .sw5e-vr-force-alignment-gm {

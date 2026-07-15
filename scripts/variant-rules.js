@@ -416,6 +416,10 @@ function forceAlignmentMarkerPercent(value) {
   return ((clampForceAlignment(value) + 100) / 200) * 100;
 }
 
+function forceAlignmentMarkerTopPercent(value) {
+  return 100 - forceAlignmentMarkerPercent(value);
+}
+
 function interpolateColor(start, end, ratio) {
   const parse = (hex) => hex.replace("#", "").match(/.{2}/g).map((part) => parseInt(part, 16));
   const [sr, sg, sb] = parse(start);
@@ -528,6 +532,35 @@ async function applyForceAlignmentDelta(actor, delta, options = {}) {
     requestForceAlignmentMinorSave(actor, nextSide, tier);
   }
   return { previous, next, entry };
+}
+
+async function resetForceAlignment(actor) {
+  if (!game.user.isGM || !actor) return;
+  await actor.setFlag(MODULE_ID, "forceAlignment", foundry.utils.deepClone(FORCE_ALIGNMENT_DEFAULT));
+}
+
+function confirmResetForceAlignment(actor, onReset) {
+  if (!game.user.isGM || !actor) return;
+  new Dialog({
+    title: "Reset Force Alignment",
+    content: `<p>Reset Force Alignment for <strong>${escapeHtml(actor.name)}</strong>?</p><p>This clears the score, cast history, resolved tier prompts, minor traits, and the action/deed log.</p>`,
+    buttons: {
+      reset: {
+        icon: '<i class="fas fa-trash"></i>',
+        label: "Reset",
+        callback: async () => {
+          await resetForceAlignment(actor);
+          ui.notifications.info(`Force Alignment reset for ${actor.name}.`);
+          onReset?.();
+        }
+      },
+      cancel: {
+        icon: '<i class="fas fa-times"></i>',
+        label: "Cancel"
+      }
+    },
+    default: "cancel"
+  }).render(true);
 }
 
 async function recordForceAlignmentCast(payload) {
@@ -1051,6 +1084,7 @@ class ForceAlignmentPanel extends Application {
       side,
       color: forceAlignmentColor(value),
       markerPercent: forceAlignmentMarkerPercent(value),
+      markerTopPercent: forceAlignmentMarkerTopPercent(value),
       tierLabel: forceAlignmentTierLabel(value),
       majorBenefit: forceAlignmentMajorBenefit(value),
       isGM: game.user.isGM,
@@ -1095,6 +1129,10 @@ class ForceAlignmentPanel extends Application {
       });
       this.render();
     });
+    html.find("[data-action='reset-alignment']").on("click", () => {
+      if (!game.user.isGM) return;
+      confirmResetForceAlignment(this.actor, () => this.render());
+    });
   }
 }
 
@@ -1119,26 +1157,23 @@ function renderForceAlignmentActorPanel(app, html) {
   const value = clampForceAlignment(state.value);
   const tier = forceAlignmentTierLabel(value);
   const color = forceAlignmentColor(value);
-  const marker = forceAlignmentMarkerPercent(value);
+  const marker = forceAlignmentMarkerTopPercent(value);
   const gmControls = game.user.isGM
     ? `<button type="button" data-action="force-alignment-adjust" data-amount="1" title="Add 1 light point"><i class="fas fa-plus"></i></button><button type="button" data-action="force-alignment-adjust" data-amount="-1" title="Add 1 dark point"><i class="fas fa-minus"></i></button>`
     : "";
   const panel = $(`
     <section class="sw5e-vr-force-alignment-sheet">
-      <div class="sw5e-vr-force-alignment-head">
-        <strong>Force Alignment</strong>
-        <span>${value > 0 ? "+" : ""}${value}</span>
+      <div class="sw5e-vr-force-alignment-crest sw5e-vr-force-alignment-light">LIGHT</div>
+      <div class="sw5e-vr-force-alignment-spine" title="${escapeHtml(tier)}">
+        <span class="sw5e-vr-force-alignment-vertical-track"></span>
+        <span class="sw5e-vr-force-alignment-vertical-marker" style="top: ${marker}%; background: ${color};"></span>
+        <span class="sw5e-vr-force-alignment-centerline"></span>
+      </div>
+      <div class="sw5e-vr-force-alignment-crest sw5e-vr-force-alignment-dark">DARK</div>
+      <div class="sw5e-vr-force-alignment-readout" title="${escapeHtml(tier)}">
+        <strong>${value > 0 ? "+" : ""}${value}</strong>
         <button type="button" data-action="force-alignment-open" title="Open Force Alignment details"><i class="fas fa-external-link-alt"></i></button>
         ${gmControls}
-      </div>
-      <div class="sw5e-vr-force-alignment-bar" title="${escapeHtml(tier)}">
-        <span class="sw5e-vr-force-alignment-track"></span>
-        <span class="sw5e-vr-force-alignment-marker" style="left: ${marker}%; background: ${color};"></span>
-      </div>
-      <div class="sw5e-vr-force-alignment-foot">
-        <span>Dark</span>
-        <span>${escapeHtml(tier)}</span>
-        <span>Light</span>
       </div>
     </section>
   `);
@@ -1155,9 +1190,8 @@ function renderForceAlignmentActorPanel(app, html) {
     app.render?.();
   });
 
-  const target = html.find("form").first();
-  if (target.length) target.prepend(panel);
-  else html.prepend(panel);
+  html.css("position", "relative");
+  html.append(panel);
 }
 
 function categoryLabel(category) {
@@ -1257,6 +1291,8 @@ Hooks.once("ready", () => {
     useModifiedActorSheet,
     disturbanceLedger,
     forceAlignmentState,
+    resetForceAlignment,
+    confirmResetForceAlignment,
     openConfig: () => new VariantRulesConfig().render(true),
     openReport: () => new VariantRulesReport().render(true),
     openHuntedLog: () => new HuntedDisturbanceLog().render(true),
