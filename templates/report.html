@@ -1,0 +1,27 @@
+<section class="sw5e-vr-report">
+  <p class="notes">Source: <a href="{{sourceUrl}}" target="_blank" rel="noreferrer">SW5e Variant Rules</a></p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Rule</th>
+        <th>Status</th>
+        <th>Enabled</th>
+        <th>Implementation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each rules}}
+        <tr>
+          <td>
+            <strong>{{name}}</strong>
+            <div class="sw5e-vr-summary">{{summary}}</div>
+          </td>
+          <td><span class="sw5e-vr-badge {{badgeClass}}">{{automation}}</span></td>
+          <td>{{#if enabled}}Yes{{else}}No{{/if}}</td>
+          <td>{{implementationNote}}</td>
+        </tr>
+      {{/each}}
+    </tbody>
+  </table>
+</section>

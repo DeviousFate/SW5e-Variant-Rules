@@ -1,0 +1,72 @@
+.sw5e-vr-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.sw5e-vr-rule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sw5e-vr-rule-list li {
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 0.45rem 0;
+}
+
+.sw5e-vr-rule-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.55rem;
+}
+
+.sw5e-vr-rule-row input {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+}
+
+.sw5e-vr-rule-row small,
+.sw5e-vr-summary {
+  display: block;
+  line-height: 1.35;
+  margin-top: 0.2rem;
+}
+
+.sw5e-vr-badge {
+  border-radius: 3px;
+  color: #fff;
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 0.35rem;
+  padding: 0.22rem 0.35rem;
+  text-transform: uppercase;
+}
+
+.sw5e-vr-badge.automated {
+  background: #237a3b;
+}
+
+.sw5e-vr-badge.reminder {
+  background: #8a6515;
+}
+
+.sw5e-vr-badge.manual {
+  background: #555;
+}
+
+.sw5e-vr-report table {
+  width: 100%;
+}
+
+.sw5e-vr-report td,
+.sw5e-vr-report th {
+  vertical-align: top;
+}
+
+.sw5e-vr-tactical {
+  margin: 0.25rem;
+  width: calc(100% - 0.5rem);
+}

@@ -1,0 +1,38 @@
+<form class="sw5e-vr-config">
+  <p class="notes">Source: <a href="{{sourceUrl}}" target="_blank" rel="noreferrer">SW5e Variant Rules</a></p>
+
+  <div class="form-group">
+    <label>
+      <input type="checkbox" name="chatReminders" {{checked chatReminders}}>
+      Show GM chat reminders for enabled manual/reminder rules
+    </label>
+  </div>
+
+  <div class="sw5e-vr-actions">
+    <button type="button" data-action="enable-all"><i class="fas fa-check-square"></i> Enable All</button>
+    <button type="button" data-action="disable-all"><i class="fas fa-square"></i> Disable All</button>
+    <button type="button" data-action="report"><i class="fas fa-clipboard-list"></i> Applicability Report</button>
+  </div>
+
+  {{#each categories}}
+    <h2>{{label}}</h2>
+    <ol class="sw5e-vr-rule-list">
+      {{#each rules}}
+        <li>
+          <label class="sw5e-vr-rule-row">
+            <input type="checkbox" name="{{id}}" data-rule-id="{{id}}" {{checked checked}}>
+            <span>
+              <strong>{{name}}</strong>
+              <span class="sw5e-vr-badge {{badgeClass}}">{{automation}}</span>
+              <small>{{summary}}</small>
+            </span>
+          </label>
+        </li>
+      {{/each}}
+    </ol>
+  {{/each}}
+
+  <footer class="sheet-footer flexrow">
+    <button type="submit"><i class="fas fa-save"></i> Save</button>
+  </footer>
+</form>
