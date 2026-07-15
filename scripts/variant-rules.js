@@ -1146,6 +1146,54 @@ function actorFromSheetApp(app) {
   return app?.actor ?? app?.document;
 }
 
+function ownText(element) {
+  return [...(element?.childNodes ?? [])]
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function closestCompactSheetBlock(element, pattern) {
+  let block = $(element);
+  for (let i = 0; i < 5; i++) {
+    const parent = block.parent();
+    if (!parent.length || parent.is("form, .window-content")) break;
+    const text = parent.text().replace(/\s+/g, " ").trim();
+    if (!pattern.test(text) || text.length > 140) break;
+    block = parent;
+  }
+  return block;
+}
+
+function findSheetTextBlock(html, pattern) {
+  const matches = html.find("*").filter((_index, element) => {
+    if ($(element).closest(".sw5e-vr-force-alignment-sheet").length) return false;
+    const text = ownText(element) || ($(element).children().length <= 2 ? element.textContent : "");
+    return pattern.test(String(text ?? "").replace(/\s+/g, " ").trim());
+  });
+  if (!matches.length) return null;
+  return closestCompactSheetBlock(matches[0], pattern);
+}
+
+function insertForceAlignmentSheetPanel(html, panel) {
+  const forcePoints = findSheetTextBlock(html, /force points/i);
+  if (forcePoints?.length) {
+    forcePoints.after(panel);
+    return;
+  }
+
+  const hitDice = findSheetTextBlock(html, /hit dice/i);
+  if (hitDice?.length) {
+    hitDice.before(panel);
+    return;
+  }
+
+  const resourceColumn = html.find(".resources, .attributes, .main-content, .sheet-body").first();
+  if (resourceColumn.length) resourceColumn.prepend(panel);
+  else html.prepend(panel);
+}
+
 function renderForceAlignmentActorPanel(app, html) {
   html = globalThis.jQuery && html instanceof jQuery ? html : $(html);
   const actor = actorFromSheetApp(app);
@@ -1154,30 +1202,28 @@ function renderForceAlignmentActorPanel(app, html) {
   const host = app?.element
     ? (globalThis.jQuery && app.element instanceof jQuery ? app.element : $(app.element))
     : html.closest(".app");
-  const target = host?.length ? host : html;
-  target.find(".sw5e-vr-force-alignment-sheet").remove();
+  host.find(".sw5e-vr-force-alignment-sheet").remove();
+  html.find(".sw5e-vr-force-alignment-sheet").remove();
 
   const state = forceAlignmentState(actor);
   const value = clampForceAlignment(state.value);
   const tier = forceAlignmentTierLabel(value);
   const color = forceAlignmentColor(value);
-  const marker = forceAlignmentMarkerTopPercent(value);
+  const marker = forceAlignmentMarkerPercent(value);
   const gmControls = game.user.isGM
     ? `<button type="button" data-action="force-alignment-adjust" data-amount="1" title="Add 1 light point"><i class="fas fa-plus"></i></button><button type="button" data-action="force-alignment-adjust" data-amount="-1" title="Add 1 dark point"><i class="fas fa-minus"></i></button>`
     : "";
   const panel = $(`
     <section class="sw5e-vr-force-alignment-sheet">
-      <div class="sw5e-vr-force-alignment-crest sw5e-vr-force-alignment-light">LIGHT</div>
-      <div class="sw5e-vr-force-alignment-spine" title="${escapeHtml(tier)}">
-        <span class="sw5e-vr-force-alignment-vertical-track"></span>
-        <span class="sw5e-vr-force-alignment-vertical-marker" style="top: ${marker}%; background: ${color};"></span>
-        <span class="sw5e-vr-force-alignment-centerline"></span>
-      </div>
-      <div class="sw5e-vr-force-alignment-crest sw5e-vr-force-alignment-dark">DARK</div>
-      <div class="sw5e-vr-force-alignment-readout" title="${escapeHtml(tier)}">
+      <div class="sw5e-vr-force-alignment-head">
+        <label>Alignment</label>
         <strong>${value > 0 ? "+" : ""}${value}</strong>
         <button type="button" data-action="force-alignment-open" title="Open Force Alignment details"><i class="fas fa-external-link-alt"></i></button>
         ${gmControls}
+      </div>
+      <div class="sw5e-vr-force-alignment-bar" title="${escapeHtml(tier)}">
+        <span class="sw5e-vr-force-alignment-track"></span>
+        <span class="sw5e-vr-force-alignment-marker" style="left: ${marker}%; background: ${color};"></span>
       </div>
     </section>
   `);
@@ -1194,7 +1240,7 @@ function renderForceAlignmentActorPanel(app, html) {
     app.render?.();
   });
 
-  target.append(panel);
+  insertForceAlignmentSheetPanel(html, panel);
 }
 
 function categoryLabel(category) {
