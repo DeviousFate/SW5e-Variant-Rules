@@ -1042,6 +1042,7 @@ async function recordDisturbanceCast(payload) {
   current.entries = [...(current.entries ?? []), entry].slice(-200);
   ledger[userId] = current;
   await setDisturbanceLedger(ledger);
+  refreshForceAlignmentPanelsForActor(entry.actorId);
 
   if (game.settings.get(MODULE_ID, "chatReminders")) {
     ChatMessage.create({
@@ -1049,6 +1050,14 @@ async function recordDisturbanceCast(payload) {
       whisper: ChatMessage.getWhisperRecipients("GM"),
       content: `<p><strong>Hunted:</strong> ${entry.actorName} cast ${entry.itemName} (level ${entry.level}), adding ${entry.points} Disturbance Point(s) to ${current.userName}. Total: ${current.total}.</p><p><strong>Detected source(s):</strong> ${summarizeForcePowerSources(entry.sources)}</p>`
     });
+  }
+}
+
+function refreshForceAlignmentPanelsForActor(actorId) {
+  for (const app of Object.values(ui.windows ?? {})) {
+    if (!(app instanceof ForceAlignmentPanel)) continue;
+    if (actorId && app.actor?.id !== actorId) continue;
+    app.render();
   }
 }
 
@@ -1678,6 +1687,10 @@ function usedItemFromHook(candidate) {
   return candidate?.item ?? candidate?.subject?.item ?? candidate;
 }
 
+function usedItemFromActivity(activity) {
+  return activity?.item ?? activity?.subject?.item ?? activity;
+}
+
 async function handleUseItem(candidate) {
   const item = usedItemFromHook(candidate);
   await handleHuntedForcePowerCast(item);
@@ -1692,6 +1705,12 @@ async function handleUseItem(candidate) {
   }
 }
 
+async function handleUseActivity(activity) {
+  const item = usedItemFromActivity(activity);
+  await handleHuntedForcePowerCast(item);
+  await handleForceAlignmentPowerCast(item);
+}
+
 function handleRollAbilityTest(_actor, _roll, abilityId) {
   postEnabledRuleReminder("careful-checks", `If this ${abilityId?.toUpperCase?.() ?? ""} check allows extra time and care, apply the table's Careful Checks procedure.`);
   postEnabledRuleReminder("saving-throw-checks", "If this check is about resisting pressure or training, consider using the appropriate saving throw instead.");
@@ -1699,6 +1718,8 @@ function handleRollAbilityTest(_actor, _roll, abilityId) {
 
 Hooks.on("dnd5e.useItem", handleUseItem);
 Hooks.on("sw5e.useItem", handleUseItem);
+Hooks.on("dnd5e.postUseActivity", handleUseActivity);
+Hooks.on("sw5e.postUseActivity", handleUseActivity);
 Hooks.on("dnd5e.postBuildAttackRollConfig", handleElevationPostBuildAttackRollConfig);
 Hooks.on("dnd5e.postAttackRollConfiguration", handleElevationPostAttackRollConfiguration);
 Hooks.on("dnd5e.rollAbilityTest", handleRollAbilityTest);
