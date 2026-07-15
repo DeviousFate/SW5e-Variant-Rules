@@ -3,6 +3,7 @@ const SOURCE_URL = "https://sw5e.com/rules/variantRules";
 const SW5E_SETTING_NAMESPACES = ["sw5e-module", "sw5e"];
 const RECENT_HUNTED_CASTS = new Map();
 const RECENT_ALIGNMENT_CASTS = new Map();
+const RESOLVED_HUNTED_COMBATS = new Set();
 const ELEVATION_LEVELS = {
   1: { label: "Dominance", minimum: 10, bonus: 2 },
   2: { label: "Superdominance", minimum: 20, bonus: 3 },
@@ -428,8 +429,24 @@ function activeCombatForActor(actor) {
   return combatants.some((combatant) => combatant.actor?.id === actor.id) ? combat : null;
 }
 
+function combatIdentifiers(combat) {
+  return new Set([combat?.id, combat?._id, combat?.uuid].filter(Boolean).map(String));
+}
+
 function combatLabel(combat) {
   return combat?.name ?? combat?.scene?.name ?? "Combat Encounter";
+}
+
+function actorIdsForCombat(combat) {
+  return new Set([...combat?.combatants ?? []].map((combatant) => combatant.actor?.id).filter(Boolean));
+}
+
+function userOwnsAnyActorId(user, actorIds) {
+  if (!user || !actorIds?.size) return false;
+  return [...actorIds].some((actorId) => {
+    const actor = game.actors?.get(actorId);
+    return actor?.testUserPermission?.(user, "OWNER");
+  });
 }
 
 function disturbancePoolsForActor(actor) {
@@ -1107,12 +1124,23 @@ function refreshForceAlignmentPanelsForActor(actorId) {
 
 async function handleHuntedCombatEnd(combat) {
   if (!game.user.isGM || !isEnabled("hunted")) return;
+  const resolutionKey = combat?.uuid ?? combat?.id ?? combat?._id;
+  if (resolutionKey && RESOLVED_HUNTED_COMBATS.has(resolutionKey)) return;
   const ledger = disturbanceLedger();
+  const combatIds = combatIdentifiers(combat);
+  const combatActorIds = actorIdsForCombat(combat);
   const updatedActors = new Set();
   let changed = false;
 
   for (const [userId, current] of Object.entries(ledger)) {
-    if (current.combatId !== combat.id) continue;
+    const user = game.users.get(userId);
+    const storedCombatId = current.combatId ? String(current.combatId) : "";
+    const exactCombatMatch = storedCombatId && combatIds.has(storedCombatId);
+    const ownerFallbackMatch = !exactCombatMatch
+      && Number(current.total ?? 0) > 0
+      && userOwnsAnyActorId(user, combatActorIds);
+    if (!exactCombatMatch && !ownerFallbackMatch) continue;
+
     const pool = Math.max(0, Math.trunc(Number(current.total ?? 0)));
     const roll = pool > 0 ? await new Roll("1d100").evaluate({ async: true }) : null;
     const detected = Boolean(roll && rollTotal(roll) <= pool);
@@ -1127,6 +1155,7 @@ async function handleHuntedCombatEnd(combat) {
       pool,
       roll: roll ? rollTotal(roll) : null,
       detected,
+      match: exactCombatMatch ? "combatId" : "actorOwner",
       huntedCount,
       huntedStatusLabel: status.label,
       huntedStatusDescription: status.description
@@ -1143,22 +1172,30 @@ async function handleHuntedCombatEnd(combat) {
     changed = true;
 
     for (const entry of current.entries ?? []) {
-      if (entry.combatId === combat.id && entry.actorId) updatedActors.add(entry.actorId);
+      if (combatIds.has(String(entry.combatId ?? "")) && entry.actorId) updatedActors.add(entry.actorId);
+    }
+    if (ownerFallbackMatch) {
+      for (const actorId of combatActorIds) {
+        const actor = game.actors?.get(actorId);
+        if (actor?.testUserPermission?.(user, "OWNER")) updatedActors.add(actorId);
+      }
     }
 
     if (!roll) continue;
     const resultText = detected
       ? `successfully detected. Hunter perception is now ${status.label} (${huntedCount}).`
       : "not detected.";
+    const matchText = ownerFallbackMatch ? " The pool was matched by actor ownership in the ended encounter." : "";
     await roll.toMessage({
       speaker: { alias: "SW5e Variant Rules" },
       whisper: ChatMessage.getWhisperRecipients("GM"),
-      flavor: `<strong>Hunted Check:</strong> ${current.userName} rolled against Disturbance Pool ${pool} and was ${resultText}`
+      flavor: `<strong>Hunted Check:</strong> ${current.userName} rolled against Disturbance Pool ${pool} and was ${resultText}${matchText}`
     });
   }
 
   if (!changed) return;
   await setDisturbanceLedger(ledger);
+  if (resolutionKey) RESOLVED_HUNTED_COMBATS.add(resolutionKey);
   for (const actorId of updatedActors) refreshForceAlignmentPanelsForActor(actorId);
 }
 
@@ -1798,6 +1835,10 @@ Hooks.on("preUpdateActor", (actor, changed) => {
 Hooks.on("deleteCombat", (combat) => {
   handleHuntedCombatEnd(combat);
   handleStrenuousCombat(combat);
+});
+
+Hooks.on("updateCombat", (combat, changed) => {
+  if (foundry.utils.getProperty(changed, "active") === false) handleHuntedCombatEnd(combat);
 });
 
 Hooks.on("createCombat", () => {
