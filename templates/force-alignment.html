@@ -28,7 +28,10 @@
         <div class="sw5e-vr-force-alignment-disturbance">
           <strong>Disturbance Pool</strong>
           {{#each disturbancePools}}
-            <span>{{userName}}: {{total}}</span>
+            <span class="sw5e-vr-force-alignment-disturbance-pool">
+              {{userName}}: {{total}}
+              <em title="{{huntedStatusDescription}}">{{huntedStatusLabel}}</em>
+            </span>
           {{/each}}
         </div>
       {{/if}}

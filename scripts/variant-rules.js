@@ -8,6 +8,14 @@ const ELEVATION_LEVELS = {
   2: { label: "Superdominance", minimum: 20, bonus: 3 },
   3: { label: "Hyperdominance", minimum: 30, bonus: 5 }
 };
+const HUNTED_STATUS_LADDER = [
+  { count: 0, label: "Unnoticed", description: "No successful Hunted check has occurred." },
+  { count: 1, label: "Detected", description: "Hunters have perceived a disturbance, but do not yet have a clear trail." },
+  { count: 2, label: "Seeking", description: "Hunters are actively looking for the source of the disturbances." },
+  { count: 3, label: "Tracking", description: "Hunters have narrowed their search and can follow recurring signs." },
+  { count: 4, label: "Closing", description: "Hunters are close enough that their arrival is a credible threat." },
+  { count: 5, label: "Hunted", description: "Hunters have identified the quarry and are prepared to act." }
+];
 
 const FORCE_ALIGNMENT_DEFAULT = {
   value: 0,
@@ -127,7 +135,7 @@ const RULES = [
   rule("force-tech-prowess", "Force and Tech Prowess", "character", "Manual", "Characters can develop broader force or tech capability.", "This is feat/feature and power-list progression data."),
   rule("force-bond", "Force-Bond", "theme", "Manual", "Characters can share a force-linked bond with narrative and situational effects.", "The benefit is intentionally relationship- and scene-dependent."),
   rule("gestalt-dichotomous", "Gestalt and Dichotomous Characters", "character", "Manual", "Characters can progress through multiple class structures in nonstandard ways.", "This requires alternate character-builder progression and cannot be inferred from an actor sheet."),
-  rule("hunted", "Hunted", "theme", "Automated", "Each player has a Disturbance Point pool that increases when they cast Force powers by the power's level; at-wills count as level 0.", "Automated for SW5E Force powers only. Tech powers are ignored. The log records user, actor, power, disturbance gain, running total, and detected class/feat/other Force-power sources."),
+  rule("hunted", "Hunted", "theme", "Automated", "Each player has a combat Disturbance Point pool that increases when they cast Force powers by the power's level; at-wills count as level 0.", "Automated for SW5E Force powers cast during combat encounters only. At combat end, the GM rolls d100 against each active pool; success records a Hunted status and advances hunter perception. Tech powers are ignored."),
   rule("invocation-versatility", "Invocation Versatility", "character", "Manual", "Characters can replace invocation choices under defined circumstances.", "This is level-up and retraining bookkeeping."),
   rule("longer-rests", "Longer Rests", "resting", "Manual", "Short and long rests take longer or have stricter availability.", "The system rest button can still be clicked; enforcement depends on calendar/timekeeping modules and GM pacing."),
   rule("milestone-leveling", "Milestone Leveling", "character", "Automated", "Characters level by story milestones instead of experience totals.", "When enabled, D&D5e Leveling Mode is set to Level Advancement without XP. When disabled, it is set to Experience Points."),
@@ -397,6 +405,33 @@ function summarizeForcePowerSources(sources = {}) {
   return parts.join(" | ") || "No Force-power-granting class, feat, or other source detected on the actor.";
 }
 
+function huntedStatusForCount(count) {
+  const numeric = Math.max(0, Math.trunc(Number(count ?? 0)));
+  return [...HUNTED_STATUS_LADDER].reverse().find((status) => numeric >= status.count) ?? HUNTED_STATUS_LADDER[0];
+}
+
+function huntedStatusView(entry = {}) {
+  const huntedCount = Math.max(0, Math.trunc(Number(entry.huntedCount ?? 0)));
+  const status = huntedStatusForCount(huntedCount);
+  return {
+    huntedCount,
+    huntedStatusLabel: status.label,
+    huntedStatusDescription: status.description
+  };
+}
+
+function activeCombatForActor(actor) {
+  if (!actor) return null;
+  const combat = game.combat;
+  if (!combat) return null;
+  const combatants = combat.combatants ?? [];
+  return combatants.some((combatant) => combatant.actor?.id === actor.id) ? combat : null;
+}
+
+function combatLabel(combat) {
+  return combat?.name ?? combat?.scene?.name ?? "Combat Encounter";
+}
+
 function disturbancePoolsForActor(actor) {
   if (!game.user.isGM || !actor) return [];
   const ledger = disturbanceLedger();
@@ -409,7 +444,8 @@ function disturbancePoolsForActor(actor) {
     pools.set(user.id, {
       userId: user.id,
       userName: user.name,
-      total: Number(ledger[user.id]?.total ?? 0)
+      total: Number(ledger[user.id]?.total ?? 0),
+      ...huntedStatusView(ledger[user.id])
     });
   }
 
@@ -419,7 +455,8 @@ function disturbancePoolsForActor(actor) {
     pools.set(entry.userId, {
       userId: entry.userId,
       userName: game.users.get(entry.userId)?.name ?? entry.userName ?? "Unknown User",
-      total: Number(entry.total ?? 0)
+      total: Number(entry.total ?? 0),
+      ...huntedStatusView(entry)
     });
   }
 
@@ -1014,6 +1051,7 @@ async function recordForceAlignmentMinorSaveResult(actor, payload) {
 
 async function recordDisturbanceCast(payload) {
   if (!game.user.isGM) return;
+  if (!payload.combatId) return;
   const ledger = disturbanceLedger();
   const userId = payload.userId ?? game.user.id;
   const user = game.users.get(userId);
@@ -1023,21 +1061,27 @@ async function recordDisturbanceCast(payload) {
     total: 0,
     entries: []
   };
+  const activeTotal = current.combatId === payload.combatId ? Number(current.total ?? 0) : 0;
   const gain = Number(payload.points ?? 0);
   const entry = {
     id: foundry.utils.randomID(),
     timestamp: new Date().toISOString(),
+    combatId: payload.combatId,
+    combatName: payload.combatName,
+    round: payload.round,
     actorId: payload.actorId,
     actorName: payload.actorName,
     itemId: payload.itemId,
     itemName: payload.itemName,
     level: Number(payload.level ?? 0),
     points: gain,
-    totalAfter: Number(current.total ?? 0) + gain,
+    totalAfter: activeTotal + gain,
     sources: payload.sources ?? { classes: [], feats: [], other: [] }
   };
 
   current.userName = user?.name ?? current.userName;
+  current.combatId = payload.combatId;
+  current.combatName = payload.combatName;
   current.total = entry.totalAfter;
   current.entries = [...(current.entries ?? []), entry].slice(-200);
   ledger[userId] = current;
@@ -1048,7 +1092,7 @@ async function recordDisturbanceCast(payload) {
     ChatMessage.create({
       speaker: { alias: "SW5e Variant Rules" },
       whisper: ChatMessage.getWhisperRecipients("GM"),
-      content: `<p><strong>Hunted:</strong> ${entry.actorName} cast ${entry.itemName} (level ${entry.level}), adding ${entry.points} Disturbance Point(s) to ${current.userName}. Total: ${current.total}.</p><p><strong>Detected source(s):</strong> ${summarizeForcePowerSources(entry.sources)}</p>`
+      content: `<p><strong>Hunted:</strong> ${entry.actorName} cast ${entry.itemName} in ${entry.combatName} (level ${entry.level}), adding ${entry.points} Disturbance Point(s) to ${current.userName}. Encounter pool: ${current.total}.</p><p><strong>Detected source(s):</strong> ${summarizeForcePowerSources(entry.sources)}</p>`
     });
   }
 }
@@ -1061,8 +1105,69 @@ function refreshForceAlignmentPanelsForActor(actorId) {
   }
 }
 
+async function handleHuntedCombatEnd(combat) {
+  if (!game.user.isGM || !isEnabled("hunted")) return;
+  const ledger = disturbanceLedger();
+  const updatedActors = new Set();
+  let changed = false;
+
+  for (const [userId, current] of Object.entries(ledger)) {
+    if (current.combatId !== combat.id) continue;
+    const pool = Math.max(0, Math.trunc(Number(current.total ?? 0)));
+    const roll = pool > 0 ? await new Roll("1d100").evaluate({ async: true }) : null;
+    const detected = Boolean(roll && rollTotal(roll) <= pool);
+    const previousCount = Math.max(0, Math.trunc(Number(current.huntedCount ?? 0)));
+    const huntedCount = detected ? previousCount + 1 : previousCount;
+    const status = huntedStatusForCount(huntedCount);
+    const resolution = {
+      id: foundry.utils.randomID(),
+      timestamp: new Date().toISOString(),
+      combatId: combat.id,
+      combatName: combatLabel(combat),
+      pool,
+      roll: roll ? rollTotal(roll) : null,
+      detected,
+      huntedCount,
+      huntedStatusLabel: status.label,
+      huntedStatusDescription: status.description
+    };
+
+    current.huntedCount = huntedCount;
+    current.huntedStatusLabel = status.label;
+    current.huntedStatusDescription = status.description;
+    current.resolutions = [...(current.resolutions ?? []), resolution].slice(-50);
+    current.total = 0;
+    delete current.combatId;
+    delete current.combatName;
+    ledger[userId] = current;
+    changed = true;
+
+    for (const entry of current.entries ?? []) {
+      if (entry.combatId === combat.id && entry.actorId) updatedActors.add(entry.actorId);
+    }
+
+    if (!roll) continue;
+    const resultText = detected
+      ? `successfully detected. Hunter perception is now ${status.label} (${huntedCount}).`
+      : "not detected.";
+    await roll.toMessage({
+      speaker: { alias: "SW5e Variant Rules" },
+      whisper: ChatMessage.getWhisperRecipients("GM"),
+      flavor: `<strong>Hunted Check:</strong> ${current.userName} rolled against Disturbance Pool ${pool} and was ${resultText}`
+    });
+  }
+
+  if (!changed) return;
+  await setDisturbanceLedger(ledger);
+  for (const actorId of updatedActors) refreshForceAlignmentPanelsForActor(actorId);
+}
+
 async function handleHuntedForcePowerCast(item) {
   if (!isEnabled("hunted") || !isForcePowerItem(item)) return;
+  const actor = item.actor;
+  const combat = activeCombatForActor(actor);
+  if (!combat) return;
+
   const dedupeKey = `${game.user.id}:${item.uuid ?? item.id}:${item.actor?.id ?? ""}`;
   const now = Date.now();
   const recent = RECENT_HUNTED_CASTS.get(dedupeKey);
@@ -1072,12 +1177,14 @@ async function handleHuntedForcePowerCast(item) {
     if (now - timestamp > 5000) RECENT_HUNTED_CASTS.delete(key);
   }
 
-  const actor = item.actor;
   const user = resolveUserForActor(actor, game.user.id);
   const level = forcePowerLevel(item);
   const payload = {
     userId: user.id,
     userName: user.name,
+    combatId: combat.id,
+    combatName: combatLabel(combat),
+    round: combat.round,
     actorId: actor?.id,
     actorName: actor?.name ?? "Unknown Actor",
     itemId: item.id,
@@ -1325,10 +1432,18 @@ class HuntedDisturbanceLog extends Application {
     return {
       users: users.map((user) => ({
         ...user,
+        ...huntedStatusView(user),
+        resolutions: [...(user.resolutions ?? [])].reverse().map((entry) => ({
+          ...entry,
+          when: new Date(entry.timestamp).toLocaleString(),
+          rollLabel: entry.roll === null || entry.roll === undefined ? "No roll" : entry.roll,
+          resultLabel: entry.detected ? "Hunted status recorded" : "Not detected"
+        })),
         entries: [...(user.entries ?? [])].reverse().map((entry) => ({
           ...entry,
           sourceSummary: summarizeForcePowerSources(entry.sources),
-          when: new Date(entry.timestamp).toLocaleString()
+          when: new Date(entry.timestamp).toLocaleString(),
+          combatName: entry.combatName ?? "Combat Encounter"
         }))
       }))
     };
@@ -1342,6 +1457,12 @@ class HuntedDisturbanceLog extends Application {
       if (!ledger[userId]) return;
       ledger[userId].total = 0;
       ledger[userId].entries = [];
+      ledger[userId].resolutions = [];
+      ledger[userId].huntedCount = 0;
+      delete ledger[userId].combatId;
+      delete ledger[userId].combatName;
+      delete ledger[userId].huntedStatusLabel;
+      delete ledger[userId].huntedStatusDescription;
       await setDisturbanceLedger(ledger);
       this.render();
     });
@@ -1675,6 +1796,7 @@ Hooks.on("preUpdateActor", (actor, changed) => {
 });
 
 Hooks.on("deleteCombat", (combat) => {
+  handleHuntedCombatEnd(combat);
   handleStrenuousCombat(combat);
 });
 

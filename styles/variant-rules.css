@@ -88,6 +88,22 @@
   margin: 0;
 }
 
+.sw5e-vr-hunted-status,
+.sw5e-vr-force-alignment-disturbance-pool em {
+  background: rgba(35, 65, 95, 0.14);
+  border: 1px solid rgba(35, 65, 95, 0.35);
+  border-radius: 3px;
+  color: inherit;
+  display: inline-block;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 0.35rem;
+  padding: 0.22rem 0.35rem;
+  text-transform: uppercase;
+}
+
 .sw5e-vr-hunted-log table {
   margin-top: 0.5rem;
   width: 100%;

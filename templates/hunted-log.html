@@ -8,15 +8,44 @@
       <section class="sw5e-vr-hunted-user">
         <header>
           <h2>{{userName}}</h2>
-          <strong>{{total}} Disturbance Point(s)</strong>
+          <strong>{{total}} Active Disturbance Point(s)</strong>
+          <span class="sw5e-vr-hunted-status" title="{{huntedStatusDescription}}">{{huntedStatusLabel}} {{huntedCount}}</span>
           <button type="button" data-action="reset-user" data-user-id="{{userId}}"><i class="fas fa-undo"></i> Reset User</button>
         </header>
+
+        {{#if resolutions.length}}
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Combat</th>
+                <th>Pool</th>
+                <th>d100</th>
+                <th>Result</th>
+                <th>Hunter Perception</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each resolutions}}
+                <tr>
+                  <td>{{when}}</td>
+                  <td>{{combatName}}</td>
+                  <td>{{pool}}</td>
+                  <td>{{rollLabel}}</td>
+                  <td>{{resultLabel}}</td>
+                  <td>{{huntedStatusLabel}} {{huntedCount}}</td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
+        {{/if}}
 
         {{#if entries.length}}
           <table>
             <thead>
               <tr>
                 <th>When</th>
+                <th>Combat</th>
                 <th>Actor</th>
                 <th>Force Power</th>
                 <th>Level</th>
@@ -29,6 +58,7 @@
               {{#each entries}}
                 <tr>
                   <td>{{when}}</td>
+                  <td>{{combatName}}</td>
                   <td>{{actorName}}</td>
                   <td>{{itemName}}</td>
                   <td>{{level}}</td>
