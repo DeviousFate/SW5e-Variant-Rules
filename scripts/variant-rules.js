@@ -1104,14 +1104,7 @@ async function recordDisturbanceCast(payload) {
   ledger[userId] = current;
   await setDisturbanceLedger(ledger);
   refreshForceAlignmentPanelsForActor(entry.actorId);
-
-  if (game.settings.get(MODULE_ID, "chatReminders")) {
-    ChatMessage.create({
-      speaker: { alias: "SW5e Variant Rules" },
-      whisper: ChatMessage.getWhisperRecipients("GM"),
-      content: `<p><strong>Hunted:</strong> ${entry.actorName} cast ${entry.itemName} in ${entry.combatName} (level ${entry.level}), adding ${entry.points} Disturbance Point(s) to ${current.userName}. Encounter pool: ${current.total}.</p><p><strong>Detected source(s):</strong> ${summarizeForcePowerSources(entry.sources)}</p>`
-    });
-  }
+  refreshHuntedLogWindows();
 }
 
 function refreshForceAlignmentPanelsForActor(actorId) {
@@ -1119,6 +1112,12 @@ function refreshForceAlignmentPanelsForActor(actorId) {
     if (!(app instanceof ForceAlignmentPanel)) continue;
     if (actorId && app.actor?.id !== actorId) continue;
     app.render();
+  }
+}
+
+function refreshHuntedLogWindows() {
+  for (const app of Object.values(ui.windows ?? {})) {
+    if (app instanceof HuntedDisturbanceLog) app.render();
   }
 }
 
@@ -1181,22 +1180,13 @@ async function handleHuntedCombatEnd(combat) {
       }
     }
 
-    if (!roll) continue;
-    const resultText = detected
-      ? `successfully detected. Hunter perception is now ${status.label} (${huntedCount}).`
-      : "not detected.";
-    const matchText = ownerFallbackMatch ? " The pool was matched by actor ownership in the ended encounter." : "";
-    await roll.toMessage({
-      speaker: { alias: "SW5e Variant Rules" },
-      whisper: ChatMessage.getWhisperRecipients("GM"),
-      flavor: `<strong>Hunted Check:</strong> ${current.userName} rolled against Disturbance Pool ${pool} and was ${resultText}${matchText}`
-    });
   }
 
   if (!changed) return;
   await setDisturbanceLedger(ledger);
   if (resolutionKey) RESOLVED_HUNTED_COMBATS.add(resolutionKey);
   for (const actorId of updatedActors) refreshForceAlignmentPanelsForActor(actorId);
+  refreshHuntedLogWindows();
 }
 
 async function handleHuntedForcePowerCast(item) {
@@ -1589,6 +1579,10 @@ class ForceAlignmentPanel extends Application {
     html.find("[data-action='reset-alignment']").on("click", () => {
       if (!game.user.isGM) return;
       confirmResetForceAlignment(this.actor, () => this.render());
+    });
+    html.find("[data-action='hunted-log']").on("click", () => {
+      if (!game.user.isGM) return;
+      new HuntedDisturbanceLog().render(true);
     });
   }
 }
