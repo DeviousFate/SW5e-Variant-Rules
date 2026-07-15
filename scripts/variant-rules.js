@@ -1,5 +1,6 @@
 const MODULE_ID = "sw5e-variant-rules";
 const SOURCE_URL = "https://sw5e.com/rules/variantRules";
+const SW5E_SETTING_NAMESPACES = ["sw5e-module", "sw5e"];
 const RECENT_HUNTED_CASTS = new Map();
 const RECENT_ALIGNMENT_CASTS = new Map();
 
@@ -95,7 +96,7 @@ const FORCE_ALIGNMENT_MAJOR_CORRUPTIONS = {
 };
 
 const RULES = [
-  rule("asi-feat", "ASI and a Feat", "character", "Manual", "Characters receiving an Ability Score Improvement can take +1 to one ability score and a feat.", "Foundry can store the final ability score and feat item, but SW5e level-up choices and balance decisions are table-managed."),
+  rule("asi-feat", "ASI and a Feat", "character", "Automated", "Characters receiving an Ability Score Improvement can take +1 to one ability score and a feat.", "When enabled, the SW5e module's ASI and Feat setting is turned on. When disabled, it is turned off."),
   rule("aging", "Aging", "character", "Manual", "Characters crossing age thresholds receive GM-chosen or rolled aging quirks and boons.", "The rule depends on species-specific thresholds and GM-selected permanent changes."),
   rule("alternate-casting", "Alternate Casting", "character", "Manual", "Forcecasting and techcasting can be swapped across classes and archetypes, including casting ability, saves, points, and recovery cadence.", "This requires alternate class progression, feature, and power-list data rather than a combat hook."),
   rule("alternative-armor", "Alternative Armor", "combat", "Manual", "Armor shifts from avoidance toward damage reduction, with base AC using proficiency bonus and armor/enhancement bonuses converting into DR.", "SW5e item AC formulas, natural armor, class AC features, and DR application are not represented uniformly enough for safe automatic rewriting."),
@@ -128,7 +129,7 @@ const RULES = [
   rule("overlapping-features", "Overlapping Features", "character", "Manual", "Duplicate or overlapping features are resolved by replacement or non-stacking guidance.", "Feature equivalence and replacement choice are character-specific."),
   rule("replacing-powers", "Replacing Powers", "casting", "Manual", "Characters can replace known powers during advancement or retraining.", "This is a character-maintenance permission, not a runtime event."),
   rule("saving-throw-checks", "Saving Throw Checks", "checks", "Reminder", "Some ability checks can be rolled as saving throws when training or resistance is more appropriate.", "The module can remind GMs, but deciding check type remains contextual."),
-  rule("simplified-forcecasting", "Simplified Forcecasting", "casting", "Manual", "Forcecasting can be simplified by reducing alignment or casting distinctions.", "This changes power taxonomy and feature text."),
+  rule("simplified-forcecasting", "Simplified Forcecasting", "casting", "Automated", "Forcecasting can be simplified by using universal forcecasting for light and dark powers.", "When enabled, the SW5e module's Simplified Forcecasting setting is turned on. When disabled, it is turned off."),
   rule("simplified-styles-masteries", "Simplified Styles and Masteries", "character", "Manual", "Fighting styles and masteries can be simplified or consolidated.", "Requires alternate feature lists and compendium data."),
   rule("starship-destiny", "Starship Destiny", "starship", "Manual", "A character's destiny can be tied to a starship with special Destiny Point spend options.", "The rule is campaign-facing and starship-scenario dependent."),
   rule("strenuous-combat", "Strenuous Combat", "combat", "Automated", "At combat end, surviving combatants make a Constitution save against DC 10 plus completed rounds or gain exhaustion.", "Automated when the setting is enabled; rest-based exhaustion recovery remains GM-managed."),
@@ -180,6 +181,32 @@ async function syncCruelerCriticalsSetting(isEnabledNow) {
   await game.settings.set("dnd5e", "criticalDamageMaxDice", Boolean(isEnabledNow));
   const label = isEnabledNow ? "enabled" : "disabled";
   ui.notifications.info(`D&D5e Critical Damage Max Dice ${label} for Crueler Criticals.`);
+}
+
+function findSettingNamespace(namespaces, key) {
+  return namespaces.find((namespace) => game.settings.settings.has(`${namespace}.${key}`));
+}
+
+async function syncBooleanSetting(namespaces, key, isEnabledNow, label) {
+  const namespace = findSettingNamespace(namespaces, key);
+  if (!namespace) {
+    ui.notifications.warn(`${label} setting was not found; the linked setting could not sync.`);
+    return;
+  }
+  const target = Boolean(isEnabledNow);
+  const current = Boolean(game.settings.get(namespace, key));
+  if (current === target) return;
+  await game.settings.set(namespace, key, target);
+  const state = target ? "enabled" : "disabled";
+  ui.notifications.info(`${label} ${state}. Reload Foundry if SW5e requests it.`);
+}
+
+function syncSw5eAsiAndFeatSetting(isEnabledNow) {
+  return syncBooleanSetting(SW5E_SETTING_NAMESPACES, "allowFeatsAndASI", isEnabledNow, "SW5e ASI and Feat");
+}
+
+function syncSw5eSimplifiedForcecastingSetting(isEnabledNow) {
+  return syncBooleanSetting(SW5E_SETTING_NAMESPACES, "simplifiedForcecasting", isEnabledNow, "SW5e Simplified Forcecasting");
 }
 
 function disturbanceLedger() {
@@ -980,6 +1007,12 @@ class VariantRulesConfig extends FormApplication {
     if (previous["crueler-criticals"] !== enabled["crueler-criticals"]) {
       await syncCruelerCriticalsSetting(enabled["crueler-criticals"]);
     }
+    if (previous["asi-feat"] !== enabled["asi-feat"]) {
+      await syncSw5eAsiAndFeatSetting(enabled["asi-feat"]);
+    }
+    if (previous["simplified-forcecasting"] !== enabled["simplified-forcecasting"]) {
+      await syncSw5eSimplifiedForcecastingSetting(enabled["simplified-forcecasting"]);
+    }
   }
 
   activateListeners(html) {
@@ -1339,7 +1372,11 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
-  if (game.user.isGM && isEnabled("crueler-criticals")) syncCruelerCriticalsSetting(true);
+  if (game.user.isGM) {
+    if (isEnabled("crueler-criticals")) syncCruelerCriticalsSetting(true);
+    if (isEnabled("asi-feat")) syncSw5eAsiAndFeatSetting(true);
+    if (isEnabled("simplified-forcecasting")) syncSw5eSimplifiedForcecastingSetting(true);
+  }
 
   game.socket.on(`module.${MODULE_ID}`, (message) => {
     if (message?.type === "huntedForcePowerCast" && isResponsibleGM()) {

@@ -11,6 +11,8 @@ Source reviewed: https://sw5e.com/rules/variantRules via the live `https://sw5ea
 - Milestone Leveling: enabling the rule sets D&D5e `levelingMode` to `noxp`; disabling it sets the mode to `xp`.
 - Force Alignment: class-sourced light and dark Force power casts of 1st level or higher move the actor on a -100 to +100 alignment scale. First unique class-sourced cast grants points equal to power level; later casts of the same power grant 1 point. At-wills, universal powers, tech powers, and detectable non-class sources are ignored. The SWVR Actor Sheet panel shows the scale, GM adjustments, minor trait save prompts, and a deed/action log.
 - Crueler Criticals: enabling the rule turns on D&D5e `criticalDamageMaxDice`, which makes critical hits maximize one set of damage dice and roll the additional critical dice. Disabling the rule turns the setting off.
+- ASI and a Feat: enabling the rule turns on SW5e `allowFeatsAndASI`; disabling it turns the setting off. SW5e marks this as reload-required.
+- Simplified Forcecasting: enabling the rule turns on SW5e `simplifiedForcecasting`; disabling it turns the setting off. SW5e marks this as reload-required.
 
 ## Reminder Only
 
