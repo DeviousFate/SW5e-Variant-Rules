@@ -3,6 +3,11 @@ const SOURCE_URL = "https://sw5e.com/rules/variantRules";
 const SW5E_SETTING_NAMESPACES = ["sw5e-module", "sw5e"];
 const RECENT_HUNTED_CASTS = new Map();
 const RECENT_ALIGNMENT_CASTS = new Map();
+const ELEVATION_LEVELS = {
+  1: { label: "Dominance", minimum: 10, bonus: 2 },
+  2: { label: "Superdominance", minimum: 20, bonus: 3 },
+  3: { label: "Hyperdominance", minimum: 30, bonus: 5 }
+};
 
 const FORCE_ALIGNMENT_DEFAULT = {
   value: 0,
@@ -115,7 +120,7 @@ const RULES = [
   rule("destiny", "Destiny", "character", "Manual", "Characters use destiny-based rewards and spend options.", "Destiny awards and spend timing are narrative campaign management."),
   rule("dismemberment", "Dismemberment", "combat", "Manual", "Major injuries can remove or impair limbs under severe combat outcomes.", "The rule is injury adjudication and character-state narration, not a single mechanical flag."),
   rule("dueling", "Dueling", "combat", "Manual", "Formal duels can use special pacing or restrictions.", "Who is dueling, when outside interference matters, and what constraints apply are narrative state."),
-  rule("elevation", "Elevation", "combat", "Manual", "Height and relative position can modify ranged and melee combat.", "Foundry token elevation data is not enough to infer all cover, reach, and line-of-fire rulings."),
+  rule("elevation", "Elevation", "combat", "Automated", "Creatures at sufficient height and horizontal distance gain the Elevation ranged attack bonus.", "Automated for ranged attack rolls against one targeted token. Target cover statuses reduce dominance unless the attacker has a detected Sharpshooter Mastery-style feat. The advantage/disadvantage guidance remains GM-adjudicated."),
   rule("exertion", "Exertion", "combat", "Manual", "Characters can push beyond normal limits at a cost such as exhaustion.", "The trigger and acceptable cost are player and GM choices."),
   rule("flanking", "Flanking", "combat", "Manual", "Positioning around a target can grant combat benefits.", "Reliable automation requires a grid geometry and reach model that matches the table's tokens, sizes, and diagonals."),
   rule("force-alignment", "Force Alignment", "casting", "Automated", "Force power use shifts a character toward light or dark alignment, with tier saves for minor traits.", "Automated for class-sourced light and dark Force powers of 1st level or higher. At-wills, universal powers, tech powers, and detectable non-class sources are ignored. GM deed adjustments and trait logs are available on the SWVR Actor Sheet panel."),
@@ -297,6 +302,14 @@ function stripHtml(value) {
   return div.textContent || div.innerText || "";
 }
 
+function normalizeKeywordText(value) {
+  return stripHtml(value)
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function hasForcePowerGrantText(item) {
   const text = `${item?.name ?? ""} ${stripHtml(itemDescriptionText(item))}`.toLowerCase();
   return /\bforce[-\s]?(casting|powers?|points?)\b/.test(text)
@@ -382,6 +395,210 @@ function summarizeForcePowerSources(sources = {}) {
   if (sources.feats?.length) parts.push(`Feat: ${sources.feats.join(", ")}`);
   if (sources.other?.length) parts.push(`Other: ${sources.other.join(", ")}`);
   return parts.join(" | ") || "No Force-power-granting class, feat, or other source detected on the actor.";
+}
+
+function tokenElevation(token) {
+  const elevation = Number(token?.document?.elevation ?? token?.elevation ?? 0);
+  return Number.isFinite(elevation) ? elevation : 0;
+}
+
+function tokenCenter(token) {
+  if (token?.center) return token.center;
+  const document = token?.document ?? token;
+  const width = Number(token?.w ?? document?.width ?? canvas?.grid?.size ?? 0);
+  const height = Number(token?.h ?? document?.height ?? canvas?.grid?.size ?? 0);
+  return {
+    x: Number(token?.x ?? document?.x ?? 0) + (width / 2),
+    y: Number(token?.y ?? document?.y ?? 0) + (height / 2)
+  };
+}
+
+function horizontalTokenDistance(attackerToken, targetToken) {
+  const attackerCenter = tokenCenter(attackerToken);
+  const targetCenter = tokenCenter(targetToken);
+
+  try {
+    const measured = canvas?.grid?.measurePath?.([attackerCenter, targetCenter], { gridSpaces: true });
+    const distance = Number(measured?.distance ?? measured);
+    if (Number.isFinite(distance)) return distance;
+  } catch (_error) {
+    // Fall back to Euclidean scene distance below.
+  }
+
+  const gridSize = Number(canvas?.dimensions?.size ?? canvas?.grid?.size ?? 100) || 100;
+  const gridDistance = Number(canvas?.dimensions?.distance ?? canvas?.scene?.grid?.distance ?? 5) || 5;
+  return (Math.hypot(attackerCenter.x - targetCenter.x, attackerCenter.y - targetCenter.y) / gridSize) * gridDistance;
+}
+
+function activeTokenForActor(actor) {
+  if (!actor || !canvas?.ready) return null;
+  const controlled = canvas.tokens?.controlled?.find((token) => token.actor?.id === actor.id);
+  if (controlled) return controlled;
+
+  const combatant = game.combat?.combatants?.find((entry) => entry.actor?.id === actor.id && entry.token?.object);
+  if (combatant?.token?.object) return combatant.token.object;
+
+  const activeTokens = actor.getActiveTokens?.(false, false) ?? actor.getActiveTokens?.() ?? [];
+  return activeTokens[0]?.object ?? activeTokens[0] ?? null;
+}
+
+function singleTargetToken() {
+  const targets = Array.from(game.user?.targets ?? []);
+  return targets.length === 1 ? targets[0] : null;
+}
+
+function activityActionType(activity, attackMode) {
+  try {
+    return activity?.getActionType?.(attackMode) ?? activity?.actionType ?? activity?.attack?.type?.value ?? "";
+  } catch (_error) {
+    return activity?.actionType ?? activity?.attack?.type?.value ?? "";
+  }
+}
+
+function isRangedAttackProcess(process, attackMode) {
+  const activity = process?.subject;
+  const actionType = String(activityActionType(activity, attackMode ?? process?.attackMode)).toLowerCase();
+  if (["rwak", "rsak", "ranged"].includes(actionType)) return true;
+  const attackModeText = String(attackMode ?? process?.attackMode ?? "").toLowerCase();
+  return attackModeText.includes("ranged");
+}
+
+function collectTokenStatusText(token) {
+  const values = new Set();
+  const add = (value) => {
+    if (value !== undefined && value !== null && value !== "") values.add(String(value));
+  };
+  const addStatuses = (statuses) => {
+    if (!statuses) return;
+    for (const status of statuses) add(status);
+  };
+
+  addStatuses(token?.document?.statuses);
+  addStatuses(token?.actor?.statuses);
+  for (const effect of token?.actor?.effects ?? []) {
+    add(effect.name ?? effect.label);
+    addStatuses(effect.statuses);
+    add(effect.statusId);
+    add(effect.getFlag?.("core", "statusId"));
+  }
+  for (const effect of token?.document?.effects ?? []) {
+    add(effect.name ?? effect.label);
+    addStatuses(effect.statuses);
+    add(effect.statusId);
+    add(effect.getFlag?.("core", "statusId"));
+  }
+
+  return [...values];
+}
+
+function targetCoverLevel(token) {
+  const normalized = collectTokenStatusText(token).map((value) => normalizeKeywordText(value).replace(/\s+/g, ""));
+  if (normalized.some((value) => value.includes("covertotal") || value.includes("totalcover"))) {
+    return { level: 3, label: "Total Cover" };
+  }
+  if (normalized.some((value) => value.includes("coverthreequarters") || value.includes("threequarterscover") || value.includes("threequartercover"))) {
+    return { level: 2, label: "Three-Quarters Cover" };
+  }
+  if (normalized.some((value) => value.includes("coverhalf") || value.includes("halfcover"))) {
+    return { level: 1, label: "Half Cover" };
+  }
+  return { level: 0, label: "" };
+}
+
+function actorSharpshooterCoverBypass(actor) {
+  const matches = [];
+  for (const item of actor?.items ?? []) {
+    if (item.type !== "feat") continue;
+    const text = normalizeKeywordText(`${item.name ?? ""} ${itemDescriptionText(item)} ${itemSourceLabel(item)}`);
+    const compact = text.replace(/\s+/g, "");
+    const namedMastery = compact.includes("sharpshootermastery");
+    const sharpshooterCoverText = /\bsharpshooter\b/.test(text)
+      && /\bcover\b/.test(text)
+      && (/\b(ignore|ignores|ignored|ignoring)\b/.test(text) || /\b(benefit|benefits)\b/.test(text));
+    if (namedMastery || sharpshooterCoverText) matches.push(item.name ?? "Sharpshooter feat");
+  }
+  return matches;
+}
+
+function baseElevationDominance(verticalFeet, horizontalFeet) {
+  if (verticalFeet >= ELEVATION_LEVELS[3].minimum && horizontalFeet >= ELEVATION_LEVELS[3].minimum) return 3;
+  if (verticalFeet >= ELEVATION_LEVELS[2].minimum && horizontalFeet >= ELEVATION_LEVELS[2].minimum) return 2;
+  if (verticalFeet >= ELEVATION_LEVELS[1].minimum && horizontalFeet >= ELEVATION_LEVELS[1].minimum) return 1;
+  return 0;
+}
+
+function evaluateElevationAttackBonus(process, attackMode) {
+  if (!isEnabled("elevation")) return null;
+  if (!isRangedAttackProcess(process, attackMode)) return null;
+
+  const activity = process?.subject;
+  const actor = activity?.actor ?? activity?.item?.actor;
+  const attackerToken = activeTokenForActor(actor);
+  const targetToken = singleTargetToken();
+  if (!actor || !attackerToken || !targetToken) return null;
+
+  const verticalFeet = tokenElevation(attackerToken) - tokenElevation(targetToken);
+  const horizontalFeet = horizontalTokenDistance(attackerToken, targetToken);
+  const baseLevel = baseElevationDominance(verticalFeet, horizontalFeet);
+  if (!baseLevel) return null;
+
+  const cover = targetCoverLevel(targetToken);
+  const sharpshooterMatches = actorSharpshooterCoverBypass(actor);
+  const coverIgnored = cover.level > 0 && sharpshooterMatches.length > 0;
+  const effectiveLevel = Math.max(0, baseLevel - (coverIgnored ? 0 : cover.level));
+  if (!effectiveLevel) return null;
+
+  const base = ELEVATION_LEVELS[baseLevel];
+  const effective = ELEVATION_LEVELS[effectiveLevel];
+  return {
+    source: "SW5e Elevation",
+    label: effective.label,
+    baseLabel: base.label,
+    level: effectiveLevel,
+    baseLevel,
+    bonus: effective.bonus,
+    verticalFeet: Math.round(verticalFeet * 100) / 100,
+    horizontalFeet: Math.round(horizontalFeet * 100) / 100,
+    attacker: {
+      actorId: actor.id,
+      actorName: actor.name,
+      tokenId: attackerToken.id ?? attackerToken.document?.id,
+      tokenName: attackerToken.name ?? attackerToken.document?.name
+    },
+    target: {
+      actorId: targetToken.actor?.id,
+      actorName: targetToken.actor?.name,
+      tokenId: targetToken.id ?? targetToken.document?.id,
+      tokenName: targetToken.name ?? targetToken.document?.name
+    },
+    cover: {
+      level: cover.level,
+      label: cover.label,
+      ignoredBySharpshooter: coverIgnored
+    },
+    sharpshooterFeats: sharpshooterMatches
+  };
+}
+
+function handleElevationPostBuildAttackRollConfig(process, rollConfig, index) {
+  if (index !== 0 || !isEnabled("elevation")) return;
+  const detail = evaluateElevationAttackBonus(process, rollConfig?.options?.attackMode);
+  if (!detail?.bonus) return;
+  if (!isRangedAttackProcess(process, rollConfig?.options?.attackMode)) return;
+
+  rollConfig.parts ??= [];
+  if (rollConfig.parts.some((part) => String(part).includes("SWVR Elevation"))) return;
+
+  rollConfig.parts.push(`${detail.bonus}[SWVR Elevation: ${detail.label}]`);
+  rollConfig.options ??= {};
+  rollConfig.options.swvrElevation = detail;
+}
+
+function handleElevationPostAttackRollConfiguration(rolls, process, _dialog, message) {
+  if (!isEnabled("elevation")) return;
+  const detail = rolls?.[0]?.options?.swvrElevation;
+  if (!detail?.bonus) return;
+  foundry.utils.setProperty(message, `data.flags.${MODULE_ID}.elevation`, detail);
 }
 
 function forceAlignmentState(actor) {
@@ -1452,6 +1669,8 @@ function handleRollAbilityTest(_actor, _roll, abilityId) {
 
 Hooks.on("dnd5e.useItem", handleUseItem);
 Hooks.on("sw5e.useItem", handleUseItem);
+Hooks.on("dnd5e.postBuildAttackRollConfig", handleElevationPostBuildAttackRollConfig);
+Hooks.on("dnd5e.postAttackRollConfiguration", handleElevationPostAttackRollConfiguration);
 Hooks.on("dnd5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("sw5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("renderActorSheet", renderForceAlignmentActorPanel);

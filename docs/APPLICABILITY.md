@@ -13,6 +13,7 @@ Source reviewed: https://sw5e.com/rules/variantRules via the live `https://sw5ea
 - Crueler Criticals: enabling the rule turns on D&D5e `criticalDamageMaxDice`, which makes critical hits maximize one set of damage dice and roll the additional critical dice. Disabling the rule turns the setting off.
 - ASI and a Feat: enabling the rule turns on SW5e `allowFeatsAndASI`; disabling it turns the setting off. SW5e marks this as reload-required.
 - Simplified Forcecasting: enabling the rule turns on SW5e `simplifiedForcecasting`; disabling it turns the setting off. SW5e marks this as reload-required.
+- Elevation: ranged attack rolls against one targeted token receive the SW5e dominance attack bonus when the attacker is sufficiently higher and horizontally distant. Target cover statuses reduce the dominance level unless the attacking actor has a detected Sharpshooter Mastery-style feat. The bonus is labeled in the attack formula and stored on the chat message flags for inspection.
 
 ## Reminder Only
 
@@ -27,3 +28,4 @@ The remaining variant rules either change character advancement data, item compe
 ## Known Limits
 
 - Force Alignment depends on Foundry item provenance. SW5e/D&D5e spell items do not always preserve whether a known power came from class progression, a feat, species trait, equipment, or another source. The automation requires a detected class/subclass Forcecasting source on the actor and filters obvious non-class sources when the item source metadata exposes them, but ambiguous powers may need GM correction through the manual adjustment/deed log.
+- Elevation currently automates the ranged attack-roll bonus only. The advantage/disadvantage escalation section is intentionally left to GM adjudication, and the AC/Dexterity-save portions are not applied because the requested implementation is attack-roll scoped.
