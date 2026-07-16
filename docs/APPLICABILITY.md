@@ -21,6 +21,10 @@ Source reviewed: https://sw5e.com/rules/variantRules via the live `https://sw5ea
 - Careful Checks: the module reminds the GM on ability checks.
 - Saving Throw Checks: the module reminds the GM on ability checks.
 
+## Assisted Character Building
+
+- Gestalt and Dichotomous Characters: the SWVR Actor Sheet can store an actor's progression mode, Gestalt class tracks, proficiency source choices, ASI handling, Dichotomous class, archetype choices, and archetype grant mode. It scans class/archetype items, calculates the Gestalt hit die, doubles displayed XP targets for guidance, flags multiclass and ASI conflicts, summarizes same/opposed casting handling, and can create or update a GM-reviewed progression note item on the actor. It does not automatically add a second Gestalt class as a normal class item or bulk-grant archetype/class features, because doing so can double-count HP, hit dice, ASIs, casting progression, and resources in SW5e/D&D5e actor data.
+
 ## Manual or Not Mechanically Applicable
 
 The remaining variant rules either change character advancement data, item compendium data, campaign structure, narrative state, or core roll workflows too deeply to safely enforce from a small world module. They are still present in the GM configuration panel so the table can enable, document, and review them.

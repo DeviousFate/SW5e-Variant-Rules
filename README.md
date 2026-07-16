@@ -31,6 +31,10 @@ https://github.com/DeviousFate/SW5e-Variant-Rules/releases/latest/download/modul
 - **Simplified Forcecasting**: Syncs the SW5e module's Simplified Forcecasting setting.
 - **Elevation**: Applies ranged attack-roll bonuses from dominance, superdominance, and hyperdominance.
 
+## Assisted Character Building
+
+- **Gestalt and Dichotomous Characters**: Adds SWVR Actor Sheet configuration, actor scanning, hit die and XP guidance, ASI/multiclass warnings, archetype tracking, and a GM-reviewed progression notes feature.
+
 ## Reminder Support
 
 Some rules are surfaced as GM reminders because they require table judgment:
