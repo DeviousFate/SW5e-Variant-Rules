@@ -71,27 +71,6 @@
   width: calc(100% - 0.5rem);
 }
 
-body.sw5e-vr-readable-context-menus #context-menu li.context-item,
-body.sw5e-vr-readable-context-menus .context-menu .context-item {
-  color: #1f2933;
-}
-
-body.sw5e-vr-readable-context-menus #context-menu li.context-item i,
-body.sw5e-vr-readable-context-menus .context-menu .context-item i {
-  color: #1f2933;
-}
-
-body.sw5e-vr-readable-context-menus #context-menu li.context-item:hover,
-body.sw5e-vr-readable-context-menus .context-menu .context-item:hover {
-  background: #1b4f66;
-  color: #ffffff;
-}
-
-body.sw5e-vr-readable-context-menus #context-menu li.context-item:hover i,
-body.sw5e-vr-readable-context-menus .context-menu .context-item:hover i {
-  color: #ffffff;
-}
-
 .sw5e-vr-hunted-user {
   border-top: 1px solid rgba(0, 0, 0, 0.16);
   margin-top: 0.8rem;
