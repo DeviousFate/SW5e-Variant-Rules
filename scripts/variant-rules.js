@@ -1468,7 +1468,7 @@ class HuntedDisturbanceLog extends Application {
         })),
         entries: [...(user.entries ?? [])].reverse().map((entry) => ({
           ...entry,
-          sourceSummary: summarizeForcePowerSources(entry.sources),
+          sourceSummary: entry.itemName ?? "Unknown Force Power",
           when: new Date(entry.timestamp).toLocaleString(),
           combatName: entry.combatName ?? "Combat Encounter"
         }))
@@ -1478,6 +1478,7 @@ class HuntedDisturbanceLog extends Application {
 
   activateListeners(html) {
     super.activateListeners(html);
+    installResizableHuntedTables(html);
     html.find("[data-action='reset-user']").on("click", async (event) => {
       const userId = event.currentTarget.dataset.userId;
       const ledger = disturbanceLedger();
@@ -1498,6 +1499,47 @@ class HuntedDisturbanceLog extends Application {
       this.render();
     });
   }
+}
+
+function installResizableHuntedTables(html) {
+  html.find(".sw5e-vr-hunted-log table").each((_index, tableElement) => {
+    const table = $(tableElement);
+    const headers = table.find("thead th");
+    if (!headers.length) return;
+
+    headers.each((_headerIndex, headerElement) => {
+      const header = $(headerElement);
+      header.css("width", `${headerElement.getBoundingClientRect().width}px`);
+    });
+    table.css("table-layout", "fixed");
+
+    headers.each((_headerIndex, headerElement) => {
+      const header = $(headerElement);
+      if (header.find(".sw5e-vr-column-resizer").length) return;
+      const handle = $(`<span class="sw5e-vr-column-resizer" aria-hidden="true"></span>`);
+      header.append(handle);
+      handle.on("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const startWidth = headerElement.getBoundingClientRect().width;
+        handle[0].setPointerCapture?.(event.pointerId);
+        const onMove = (moveEvent) => {
+          const nextWidth = Math.max(48, startWidth + (moveEvent.clientX - startX));
+          header.css("width", `${nextWidth}px`);
+        };
+        const onEnd = (endEvent) => {
+          handle[0].releasePointerCapture?.(endEvent.pointerId);
+          document.removeEventListener("pointermove", onMove);
+          document.removeEventListener("pointerup", onEnd);
+          document.removeEventListener("pointercancel", onEnd);
+        };
+        document.addEventListener("pointermove", onMove);
+        document.addEventListener("pointerup", onEnd);
+        document.addEventListener("pointercancel", onEnd);
+      });
+    });
+  });
 }
 
 class ForceAlignmentPanel extends Application {

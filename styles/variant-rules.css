@@ -109,6 +109,33 @@
   width: 100%;
 }
 
+.sw5e-vr-hunted-log th {
+  overflow: hidden;
+  position: relative;
+}
+
+.sw5e-vr-column-resizer {
+  bottom: 0;
+  cursor: col-resize;
+  display: block;
+  position: absolute;
+  right: -3px;
+  top: 0;
+  width: 7px;
+  z-index: 1;
+}
+
+.sw5e-vr-column-resizer::after {
+  background: rgba(0, 0, 0, 0.18);
+  bottom: 4px;
+  content: "";
+  display: block;
+  position: absolute;
+  right: 3px;
+  top: 4px;
+  width: 1px;
+}
+
 .sw5e-vr-hunted-log td,
 .sw5e-vr-hunted-log th {
   vertical-align: top;
