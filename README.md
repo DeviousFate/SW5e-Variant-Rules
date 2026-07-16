@@ -53,6 +53,14 @@ After enabling the module in a world, open:
 
 From there, GMs can enable or disable individual variant rules, open the applicability report, and review the Hunted log.
 
+## Bug Reports
+
+Please report bugs through GitHub Issues:
+
+https://github.com/DeviousFate/SW5e-Variant-Rules/issues
+
+Include your Foundry version, D&D5e system version, SW5e module version, this module's version, active modules, steps to reproduce, and any console errors.
+
 ## Notes
 
 This module is not an official SW5e product. It is a Foundry automation layer for tables using SW5e content and variant rules.
