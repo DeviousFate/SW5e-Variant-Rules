@@ -35,6 +35,8 @@ https://github.com/DeviousFate/SW5e-Variant-Rules/releases/latest/download/modul
 
 - **Gestalt and Dichotomous Characters**: Adds SWVR Actor Sheet configuration, actor scanning, hit die and XP guidance, ASI/multiclass warnings, archetype tracking, and a GM-reviewed progression notes feature.
 
+To configure a Gestalt character, enable **Gestalt and Dichotomous Characters** and **Use SWVR Actor Sheet**, add the primary and secondary class items to the actor, open the sheet's **Progression** panel, set **Progression Mode** to **Gestalt**, choose the class sources for saving throws, skills, equipment, and ASI handling, then select **Save and Scan**.
+
 ## Reminder Support
 
 Some rules are surfaced as GM reminders because they require table judgment:

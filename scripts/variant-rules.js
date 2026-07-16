@@ -1039,7 +1039,8 @@ function actorHasForceAlignmentSurface(actor) {
   if (!actor) return false;
   const state = forceAlignmentState(actor);
   if (state.value || state.minorTraits?.length || state.deedLog?.length) return true;
-  return [...(actor.items ?? [])].some((item) => item.type === "spell" && ["lgt", "drk"].includes(item.system?.school) && forcePowerLevel(item) > 0);
+  if (actorHasClassForcePowerSource(actor)) return true;
+  return [...(actor.items ?? [])].some((item) => item.type === "spell" && ["lgt", "drk"].includes(item.system?.school));
 }
 
 function isLikelyNonClassPowerSource(item) {
@@ -2182,14 +2183,16 @@ function insertForceAlignmentSheetPanel(html, panel) {
   const forcePoints = findSheetTextBlock(html, /force\s*points/i);
   if (forcePoints?.length) {
     forcePoints.after(panel);
-    return;
+    return true;
   }
 
   const hitDice = findSheetTextBlock(html, /hit\s*dice/i);
   if (hitDice?.length) {
     hitDice.before(panel);
-    return;
+    return true;
   }
+
+  return false;
 }
 
 function renderForceAlignmentActorPanel(app, html) {
@@ -2238,7 +2241,9 @@ function renderForceAlignmentActorPanel(app, html) {
     app.render?.();
   });
 
-  insertForceAlignmentSheetPanel(html, panel);
+  if (!insertForceAlignmentSheetPanel(html, panel)) {
+    console.warn(`SWVR could not find an actor sheet insertion point for Force Alignment on ${actor.name}.`);
+  }
 }
 
 function renderProgressionActorPanel(app, html) {
