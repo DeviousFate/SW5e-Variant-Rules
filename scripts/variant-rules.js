@@ -168,6 +168,14 @@ function useModifiedActorSheet() {
   return Boolean(game.settings.get(MODULE_ID, "useModifiedActorSheet"));
 }
 
+function useReadableContextMenus() {
+  return Boolean(game.settings.get(MODULE_ID, "readableContextMenus"));
+}
+
+function applyReadableContextMenuClass() {
+  document.body?.classList.toggle("sw5e-vr-readable-context-menus", useReadableContextMenus());
+}
+
 function setEnabledRules(values) {
   return game.settings.set(MODULE_ID, "enabledRules", values);
 }
@@ -1379,6 +1387,7 @@ class VariantRulesConfig extends FormApplication {
       sourceUrl: SOURCE_URL,
       chatReminders: game.settings.get(MODULE_ID, "chatReminders"),
       useModifiedActorSheet: useModifiedActorSheet(),
+      readableContextMenus: useReadableContextMenus(),
       categories
     };
   }
@@ -1390,6 +1399,8 @@ class VariantRulesConfig extends FormApplication {
     await setEnabledRules(enabled);
     await game.settings.set(MODULE_ID, "chatReminders", Boolean(formData.chatReminders));
     await game.settings.set(MODULE_ID, "useModifiedActorSheet", Boolean(formData.useModifiedActorSheet));
+    await game.settings.set(MODULE_ID, "readableContextMenus", Boolean(formData.readableContextMenus));
+    applyReadableContextMenuClass();
     if (previous["milestone-leveling"] !== enabled["milestone-leveling"]) {
       await syncMilestoneLevelingSetting(enabled["milestone-leveling"]);
     }
@@ -1847,6 +1858,16 @@ Hooks.once("init", () => {
     requiresReload: true
   });
 
+  game.settings.register(MODULE_ID, "readableContextMenus", {
+    name: "Improve Context Menu Readability",
+    hint: "Adjust Foundry context menu text colors when a theme makes menu items hard to read.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: applyReadableContextMenuClass
+  });
+
   game.settings.register(MODULE_ID, "disturbanceLedger", {
     name: "Hunted Disturbance Ledger",
     scope: "world",
@@ -1875,6 +1896,8 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
+  applyReadableContextMenuClass();
+
   if (game.user.isGM) {
     if (isEnabled("crueler-criticals")) syncCruelerCriticalsSetting(true);
     if (isEnabled("asi-feat")) syncSw5eAsiAndFeatSetting(true);
