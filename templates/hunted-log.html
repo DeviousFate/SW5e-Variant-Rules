@@ -51,7 +51,7 @@
                 <th>Level</th>
                 <th>Gain</th>
                 <th>Total</th>
-                <th>Detected Force Power</th>
+                <th>Detected Source(s)</th>
               </tr>
             </thead>
             <tbody>
@@ -64,7 +64,16 @@
                   <td>{{level}}</td>
                   <td>{{points}}</td>
                   <td>{{totalAfter}}</td>
-                  <td>{{sourceSummary}}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="sw5e-vr-hunted-source-button"
+                      data-action="source-detail"
+                      data-source-id="{{sourceId}}"
+                    >
+                      Sources
+                    </button>
+                  </td>
                 </tr>
               {{/each}}
             </tbody>

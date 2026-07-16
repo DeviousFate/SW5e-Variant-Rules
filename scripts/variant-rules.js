@@ -1443,6 +1443,11 @@ class VariantRulesReport extends Application {
 }
 
 class HuntedDisturbanceLog extends Application {
+  constructor(options = {}) {
+    super(options);
+    this.sourceDetails = new Map();
+  }
+
   static get defaultOptions() {
     return foundry.utils.mergeObject(super.defaultOptions, {
       id: `${MODULE_ID}-hunted-log`,
@@ -1456,6 +1461,7 @@ class HuntedDisturbanceLog extends Application {
 
   getData() {
     const users = Object.values(disturbanceLedger()).sort((a, b) => String(a.userName).localeCompare(String(b.userName)));
+    this.sourceDetails.clear();
     return {
       users: users.map((user) => ({
         ...user,
@@ -1468,7 +1474,8 @@ class HuntedDisturbanceLog extends Application {
         })),
         entries: [...(user.entries ?? [])].reverse().map((entry) => ({
           ...entry,
-          sourceSummary: entry.itemName ?? "Unknown Force Power",
+          sourceId: this.cacheSourceDetail(entry),
+          sourceSummary: summarizeForcePowerSources(entry.sources),
           when: new Date(entry.timestamp).toLocaleString(),
           combatName: entry.combatName ?? "Combat Encounter"
         }))
@@ -1498,6 +1505,52 @@ class HuntedDisturbanceLog extends Application {
       await setDisturbanceLedger({});
       this.render();
     });
+    html.find("[data-action='source-detail']").on("click", (event) => {
+      const detail = this.sourceDetails.get(event.currentTarget.dataset.sourceId);
+      if (detail) new HuntedSourceDetail(detail).render(true);
+    });
+  }
+
+  cacheSourceDetail(entry) {
+    const id = entry.id ?? foundry.utils.randomID();
+    this.sourceDetails.set(id, {
+      actorName: entry.actorName,
+      itemName: entry.itemName,
+      sourceSummary: summarizeForcePowerSources(entry.sources)
+    });
+    return id;
+  }
+}
+
+class HuntedSourceDetail extends Application {
+  constructor(data, options = {}) {
+    super(options);
+    this.data = data;
+  }
+
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: `${MODULE_ID}-hunted-source-detail`,
+      title: "Detected Sources",
+      width: 420,
+      height: "auto",
+      resizable: true
+    });
+  }
+
+  get title() {
+    return `Detected Sources: ${this.data.itemName ?? "Force Power"}`;
+  }
+
+  async _renderInner() {
+    const actorName = escapeHtml(this.data.actorName ?? "Unknown Actor");
+    const itemName = escapeHtml(this.data.itemName ?? "Unknown Force Power");
+    const sourceSummary = escapeHtml(this.data.sourceSummary ?? "No detected source detail.");
+    return $(`<section class="sw5e-vr-hunted-source-detail">
+      <p><strong>Actor:</strong> ${actorName}</p>
+      <p><strong>Force Power:</strong> ${itemName}</p>
+      <p><strong>Detected Source(s):</strong> ${sourceSummary}</p>
+    </section>`);
   }
 }
 

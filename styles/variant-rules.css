@@ -141,6 +141,14 @@
   vertical-align: top;
 }
 
+.sw5e-vr-hunted-source-button {
+  width: 100%;
+}
+
+.sw5e-vr-hunted-source-detail p {
+  overflow-wrap: anywhere;
+}
+
 .sw5e-vr-force-alignment-sheet {
   margin: 0.35rem 0;
   max-width: 220px;
