@@ -15,7 +15,7 @@ This module is intended for GMs who want table-level control over variant rule o
 Use this manifest URL in Foundry's **Install Module** dialog:
 
 ```text
-https://raw.githubusercontent.com/DeviousFate/SW5e-Variant-Rules/main/module.json
+https://github.com/DeviousFate/SW5e-Variant-Rules/releases/latest/download/module.json
 ```
 
 ## Current Automation
