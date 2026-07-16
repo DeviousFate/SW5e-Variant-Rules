@@ -7,6 +7,7 @@ const SW5E_SETTING_NAMESPACES = ["sw5e-module", "sw5e"];
 const RECENT_HUNTED_CASTS = new Map();
 const RECENT_ALIGNMENT_CASTS = new Map();
 const RESOLVED_HUNTED_COMBATS = new Set();
+const ALTERNATIVE_ARMOR_ATTACK_PROPERTY = "swvr-alt-armor-attack";
 const ELEVATION_LEVELS = {
   1: { label: "Dominance", minimum: 10, bonus: 2 },
   2: { label: "Superdominance", minimum: 20, bonus: 3 },
@@ -39,12 +40,18 @@ const PROGRESSION_DEFAULT = {
   asiMode: "single",
   dichotomousClassId: "",
   archetypeIds: [],
+  gestaltArchetypeIds: {},
   archetypeGrantMode: "both"
 };
 
 const GESTALT_ASI_LEVELS = [4, 8, 12, 16, 19];
 const STANDARD_HIT_DICE = [4, 6, 8, 10, 12];
 const PROGRESSION_NOTE_NAME = "SWVR Gestalt / Dichotomous Progression Notes";
+const PROGRESSION_CLASS_REFERENCE_PREFIX = "SWVR Gestalt Class Reference";
+const PROGRESSION_ARCHETYPE_REFERENCE_PREFIX = "SWVR Archetype Reference";
+const GESTALT_PREPARED_PATCH_FLAG = "__swvrGestaltPreparedDataPatch";
+const GESTALT_BASE_PATCH_FLAG = "__swvrGestaltBaseDataPatch";
+const GESTALT_DERIVED_PATCH_FLAG = "__swvrGestaltDerivedDataPatch";
 
 const FORCE_ALIGNMENT_MINOR_TABLES = {
   benevolence: {
@@ -133,7 +140,7 @@ const RULES = [
   rule("asi-feat", "ASI and a Feat", "character", "Automated", "Characters receiving an Ability Score Improvement can take +1 to one ability score and a feat.", "When enabled, the SW5e module's ASI and Feat setting is turned on. When disabled, it is turned off."),
   rule("aging", "Aging", "character", "Manual", "Characters crossing age thresholds receive GM-chosen or rolled aging quirks and boons.", "The rule depends on species-specific thresholds and GM-selected permanent changes."),
   rule("alternate-casting", "Alternate Casting", "character", "Manual", "Forcecasting and techcasting can be swapped across classes and archetypes, including casting ability, saves, points, and recovery cadence.", "This requires alternate class progression, feature, and power-list data rather than a combat hook."),
-  rule("alternative-armor", "Alternative Armor", "combat", "Manual", "Armor shifts from avoidance toward damage reduction, with base AC using proficiency bonus and armor/enhancement bonuses converting into DR.", "SW5e item AC formulas, natural armor, class AC features, and DR application are not represented uniformly enough for safe automatic rewriting."),
+  rule("alternative-armor", "Alternative Armor", "combat", "Automated", "Armor shifts from avoidance toward damage reduction, with base AC using proficiency bonus and armor/enhancement bonuses converting into DR.", "Automated as a calculated SWVR Actor Sheet panel and D&D5e damage-application hook. Attack-activity damage rolls are tagged when rolled; when applied, armor/natural/unarmored DR reduces positive damage to a minimum of 1. The actor's core AC field is not rewritten."),
   rule("alternative-at-wills-extra-attack", "Alternative At-Wills and Extra Attack", "character", "Manual", "At-will powers scale by caster level instead of character level, and multiclass Extra Attack can combine qualified class levels.", "This touches power scaling, class tables, archetypes, and attack-count logic spread across character build data."),
   rule("ammunition-sizes", "Ammunition Sizes", "inventory", "Manual", "Ammo is split into weapon-damage-size categories instead of broad shared ammunition pools.", "Requires replacement ammunition items and weapon-to-ammo mapping in world or compendium data."),
   rule("bonus-action-consumables", "Bonus Action Consumables", "combat", "Reminder", "Consumables can be used as a bonus action unless their normal activation is already a bonus action.", "The module reports the enabled rule; exact action economy enforcement depends on the item workflow used at the table."),
@@ -155,7 +162,7 @@ const RULES = [
   rule("force-alignment", "Force Alignment", "casting", "Automated", "Force power use shifts a character toward light or dark alignment, with tier saves for minor traits.", "Automated for class-sourced light and dark Force powers of 1st level or higher. At-wills, universal powers, tech powers, and detectable non-class sources are ignored. GM deed adjustments and trait logs are available on the SWVR Actor Sheet panel."),
   rule("force-tech-prowess", "Force and Tech Prowess", "character", "Manual", "Characters can develop broader force or tech capability.", "This is feat/feature and power-list progression data."),
   rule("force-bond", "Force-Bond", "theme", "Manual", "Characters can share a force-linked bond with narrative and situational effects.", "The benefit is intentionally relationship- and scene-dependent."),
-  rule("gestalt-dichotomous", "Gestalt and Dichotomous Characters", "character", "Assisted", "Characters can progress through multiple class structures in nonstandard ways.", "The SWVR Actor Sheet stores Gestalt/Dichotomous configuration, scans class and archetype items, calculates effective hit die and XP guidance, flags ASI/multiclass conflicts, and can create a GM-reviewed progression note item. It does not automatically add a second class as a normal class item, because that would risk double-counting HP, ASIs, casting, and class resources."),
+  rule("gestalt-dichotomous", "Gestalt and Dichotomous Characters", "character", "Assisted", "Characters can progress through multiple class structures in nonstandard ways.", "The SWVR Actor Sheet stores Gestalt/Dichotomous configuration, scans class and archetype items, calculates effective hit die and XP guidance, corrects prepared level/proficiency/HP/hit dice for Gestalt actors, flags ASI/multiclass conflicts, and can create a GM-reviewed progression note item."),
   rule("hunted", "Hunted", "theme", "Automated", "Each player has a combat Disturbance Point pool that increases when they cast Force powers by the power's level; at-wills count as level 0.", "Automated for SW5E Force powers cast during combat encounters only. At combat end, the GM rolls d100 against each active pool; success records a Hunted status and advances hunter perception. Tech powers are ignored."),
   rule("invocation-versatility", "Invocation Versatility", "character", "Manual", "Characters can replace invocation choices under defined circumstances.", "This is level-up and retraining bookkeeping."),
   rule("longer-rests", "Longer Rests", "resting", "Manual", "Short and long rests take longer or have stricter availability.", "The system rest button can still be clicked; enforcement depends on calendar/timekeeping modules and GM pacing."),
@@ -299,6 +306,14 @@ async function rollConSave(actor, dc, flavor) {
 
 function rollTotal(roll) {
   return Number(roll?.total ?? 0);
+}
+
+function actorAbilityMod(actor, abilityId) {
+  return Number(getActorSystem(actor, `abilities.${abilityId}.mod`) ?? 0);
+}
+
+function actorProficiencyBonus(actor) {
+  return Number(getActorSystem(actor, "attributes.prof") ?? getActorSystem(actor, "prof") ?? 0);
 }
 
 function isResponsibleGM() {
@@ -697,11 +712,205 @@ function handleElevationPostBuildAttackRollConfig(process, rollConfig, index) {
   rollConfig.options.swvrElevation = detail;
 }
 
+function handleAlternativeArmorPostBuildAttackRollConfig(_process, rollConfig, index) {
+  if (index !== 0 || !isEnabled("alternative-armor")) return;
+  const target = singleTargetToken();
+  const actor = target?.actor;
+  if (!actor) return;
+  const summary = alternativeArmorSummary(actor);
+  if (!summary.currentAc || !summary.value) return;
+
+  const delta = summary.currentAc - summary.value;
+  if (!delta) return;
+
+  rollConfig.parts ??= [];
+  if (rollConfig.parts.some((part) => String(part).includes("SWVR Alternative Armor"))) return;
+  const sign = delta > 0 ? "+" : "";
+  rollConfig.parts.push(`${sign}${delta}[SWVR Alternative Armor: target AC ${summary.value}]`);
+  rollConfig.options ??= {};
+  rollConfig.options.swvrAlternativeArmor = {
+    targetActorId: actor.id,
+    targetName: actor.name,
+    normalAc: summary.currentAc,
+    alternativeAc: summary.value,
+    attackDelta: delta,
+    dr: summary.dr
+  };
+}
+
 function handleElevationPostAttackRollConfiguration(rolls, process, _dialog, message) {
   if (!isEnabled("elevation")) return;
   const detail = rolls?.[0]?.options?.swvrElevation;
   if (!detail?.bonus) return;
   foundry.utils.setProperty(message, `data.flags.${MODULE_ID}.elevation`, detail);
+}
+
+function handleAlternativeArmorPostAttackRollConfiguration(rolls, _process, _dialog, message) {
+  if (!isEnabled("alternative-armor")) return;
+  const detail = rolls?.[0]?.options?.swvrAlternativeArmor;
+  if (!detail) return;
+  foundry.utils.setProperty(message, `data.flags.${MODULE_ID}.alternativeArmor`, detail);
+}
+
+function equippedArmorItems(actor) {
+  return [...(actor?.items ?? [])].filter((item) => {
+    if (item.type !== "equipment" || !item.system?.equipped) return false;
+    return ["light", "medium", "heavy", "shield"].includes(item.system?.type?.value);
+  });
+}
+
+function equippedArmor(actor) {
+  return getActorSystem(actor, "attributes.ac.equippedArmor")
+    ?? equippedArmorItems(actor).find((item) => item.system?.type?.value !== "shield")
+    ?? null;
+}
+
+function equippedShield(actor) {
+  return getActorSystem(actor, "attributes.ac.equippedShield")
+    ?? equippedArmorItems(actor).find((item) => item.system?.type?.value === "shield")
+    ?? null;
+}
+
+function armorValue(item) {
+  return Number(item?.system?.armor?.value ?? item?.system?.armor?.base ?? 0);
+}
+
+function armorDexCap(item) {
+  const cap = item?.system?.armor?.dex;
+  return Number.isFinite(Number(cap)) ? Number(cap) : Infinity;
+}
+
+function alternativeArmorSummary(actor) {
+  const ac = getActorSystem(actor, "attributes.ac") ?? {};
+  const armor = equippedArmor(actor);
+  const shield = equippedShield(actor);
+  const armorType = armor?.system?.type?.value ?? "";
+  const dexMod = actorAbilityMod(actor, "dex");
+  const prof = actorProficiencyBonus(actor);
+  const details = [];
+  const warnings = [];
+
+  let dexToAc = dexMod;
+  let dr = 0;
+  let source = "Unarmored";
+
+  if (armor) {
+    const value = armorValue(armor);
+    source = armor.name;
+    dr += Math.max(0, value - 10);
+    if (armorType === "heavy") {
+      dexToAc = 0;
+      details.push("Heavy armor ignores Dexterity for Alternative Armor AC.");
+    } else {
+      dexToAc = Math.min(dexMod, armorDexCap(armor));
+      if (armorType === "medium") details.push("Medium armor caps Dexterity to AC as normal.");
+    }
+    details.push(`${armor.name} converts ${value} normal armor AC into DR ${Math.max(0, value - 10)}.`);
+  } else {
+    const calc = String(ac.calc ?? "");
+    if (calc === "unarmoredBarb") {
+      const con = Math.max(0, actorAbilityMod(actor, "con"));
+      dr += con;
+      details.push(`Constitution modifier converts to DR ${con} for unarmored defense.`);
+    } else if (calc === "unarmoredMonk") {
+      const wis = actorAbilityMod(actor, "wis");
+      dexToAc += wis;
+      details.push(`Wisdom modifier ${wis >= 0 ? "+" : ""}${wis} remains AC for unarmored defense.`);
+    } else if (calc === "unarmoredBard") {
+      const cha = actorAbilityMod(actor, "cha");
+      dexToAc += cha;
+      details.push(`Charisma modifier ${cha >= 0 ? "+" : ""}${cha} remains AC for unarmored defense.`);
+    } else if (["natural", "mage", "draconic"].includes(calc)) {
+      const naturalBase = Number(ac.flat ?? ac.value ?? 0);
+      const naturalDr = Math.max(0, naturalBase - 10);
+      if (naturalDr) {
+        dr += naturalDr;
+        details.push(`Natural/base AC adjustment converts to DR ${naturalDr}.`);
+      }
+    } else if (calc === "custom") {
+      warnings.push("Custom AC formulas need GM review under Alternative Armor.");
+    }
+  }
+
+  const shieldBonus = armorValue(shield);
+  if (shieldBonus) details.push(`${shield.name} remains an AC bonus of ${shieldBonus}.`);
+
+  const bonus = Number(ac.bonus ?? 0);
+  const cover = Number(ac.cover ?? 0);
+  const minimum = Number(ac.min ?? 0);
+  const calculated = 8 + prof + dexToAc + shieldBonus + bonus + cover;
+  const value = minimum ? Math.max(minimum, calculated) : calculated;
+
+  return {
+    actor,
+    armor,
+    shield,
+    source,
+    armorType,
+    prof,
+    dexMod,
+    dexToAc,
+    shieldBonus,
+    bonus,
+    cover,
+    minimum,
+    value,
+    currentAc: Number(ac.value ?? 0),
+    dr,
+    details,
+    warnings
+  };
+}
+
+function isAttackActivity(subject) {
+  return subject?.type === "attack" || subject?.constructor?.metadata?.type === "attack";
+}
+
+function markAlternativeArmorAttackDamage(rolls, data) {
+  if (!isEnabled("alternative-armor") || !isAttackActivity(data?.subject)) return;
+  for (const roll of rolls ?? []) {
+    roll.options ??= {};
+    roll.options.properties ??= [];
+    if (roll.options.properties instanceof Set) {
+      roll.options.properties.add(ALTERNATIVE_ARMOR_ATTACK_PROPERTY);
+    } else if (!roll.options.properties.includes(ALTERNATIVE_ARMOR_ATTACK_PROPERTY)) {
+      roll.options.properties.push(ALTERNATIVE_ARMOR_ATTACK_PROPERTY);
+    }
+  }
+}
+
+function hasAlternativeArmorAttackMarker(damages) {
+  return [...(damages ?? [])].some((damage) => damage?.properties?.has?.(ALTERNATIVE_ARMOR_ATTACK_PROPERTY));
+}
+
+function applyAlternativeArmorDamageReduction(actor, damages, options = {}) {
+  if (!isEnabled("alternative-armor") || !hasAlternativeArmorAttackMarker(damages)) return;
+  if (options?.only === "healing" || damages.amount <= 0) return;
+
+  const summary = alternativeArmorSummary(actor);
+  const reduction = Math.min(summary.dr, Math.max(0, damages.amount - 1));
+  if (reduction <= 0) return;
+
+  damages.amount -= reduction;
+  damages.swvrAlternativeArmor = {
+    dr: summary.dr,
+    applied: reduction,
+    source: summary.source,
+    ac: summary.value
+  };
+  options.swvrAlternativeArmor = damages.swvrAlternativeArmor;
+
+  let remaining = reduction;
+  for (const damage of damages) {
+    damage.properties?.delete?.(ALTERNATIVE_ARMOR_ATTACK_PROPERTY);
+    if (remaining <= 0 || damage.value <= 0) continue;
+    const applied = Math.min(remaining, damage.value);
+    damage.value -= applied;
+    damage.active ??= {};
+    damage.active.swvrAlternativeArmor = true;
+    damage.active.modification = true;
+    remaining -= applied;
+  }
 }
 
 function progressionState(actor) {
@@ -717,12 +926,30 @@ function classItems(actor) {
   return [...(actor?.items ?? [])].filter((item) => item.type === "class");
 }
 
+function progressionClassReferenceData(item) {
+  return item?.getFlag?.(MODULE_ID, "gestaltClassReference") ?? item?.flags?.[MODULE_ID]?.gestaltClassReference ?? null;
+}
+
+function progressionClassReferenceItems(actor) {
+  return [...(actor?.items ?? [])].filter((item) => progressionClassReferenceData(item));
+}
+
+function progressionArchetypeReferenceData(item) {
+  return item?.getFlag?.(MODULE_ID, "gestaltArchetypeReference") ?? item?.flags?.[MODULE_ID]?.gestaltArchetypeReference ?? null;
+}
+
+function progressionArchetypeReferenceItems(actor) {
+  return [...(actor?.items ?? [])].filter((item) => progressionArchetypeReferenceData(item));
+}
+
 function subclassItems(actor) {
-  return [...(actor?.items ?? [])].filter((item) => {
+  const nativeItems = [...(actor?.items ?? [])].filter((item) => {
     if (item.type === "subclass") return true;
     const typeText = normalizeKeywordText(`${item.type ?? ""} ${item.system?.type?.value ?? ""} ${item.system?.type ?? ""}`);
     return /\b(subclass|archetype)\b/.test(typeText);
   });
+  const references = progressionArchetypeReferenceItems(actor);
+  return [...nativeItems, ...references.filter((item) => !nativeItems.some((native) => native.id === item.id))];
 }
 
 function itemLevelValue(item) {
@@ -759,6 +986,232 @@ function averagedHitDie(sizeA, sizeB) {
   return [...STANDARD_HIT_DICE].reverse().find((size) => size <= average) ?? 4;
 }
 
+function primaryGestaltClassItem(actor, scan) {
+  const item = actor?.items?.get?.(scan?.primary?.id);
+  return item?.type === "class" ? item : null;
+}
+
+function secondaryGestaltClassItem(actor, scan) {
+  const item = actor?.items?.get?.(scan?.secondary?.id);
+  return item?.type === "class" ? item : null;
+}
+
+function proficiencyBonusForLevel(level) {
+  const numericLevel = Math.max(Number(level) || 0, 1);
+  return Math.ceil(numericLevel / 4) + 1;
+}
+
+function evaluateFormulaNumber(value, rollData = {}) {
+  if (value === null || value === undefined || value === "") return 0;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  try {
+    return Number(Roll.create(String(value), rollData).evaluateSync().total) || 0;
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Unable to evaluate formula "${value}".`, error);
+    return 0;
+  }
+}
+
+function hpAdvancementForClass(classItem) {
+  return classItem?.advancement?.byType?.HitPoints?.[0] ?? null;
+}
+
+function hpAdvancementValueForLevel(advancement, hitDie, level) {
+  const values = advancement?.value ?? {};
+  const raw = values[level] ?? values[String(level)];
+  if (raw === "max") return hitDie;
+  if (raw === "avg") return (hitDie / 2) + 1;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.clamp(numeric, 1, hitDie);
+  return level === 1 ? hitDie : (hitDie / 2) + 1;
+}
+
+function gestaltHpMax(actor, primaryItem, secondaryItem, hitDie, level) {
+  const advancement = hpAdvancementForClass(primaryItem) ?? hpAdvancementForClass(secondaryItem);
+  if (!advancement || !hitDie || !level) return null;
+
+  const abilityId = CONFIG?.DND5E?.defaultAbilities?.hitPoints ?? "con";
+  const mod = Number(getActorSystem(actor, `abilities.${abilityId}.mod`) ?? 0);
+  let classHp = 0;
+  for (let classLevel = 1; classLevel <= level; classLevel++) {
+    const base = hpAdvancementValueForLevel(advancement, hitDie, classLevel);
+    classHp += Math.max(base + mod, 1);
+  }
+
+  const rollData = actor?.getRollData?.({ deterministic: true }) ?? {};
+  const hpBonuses = getActorSystem(actor, "attributes.hp.bonuses") ?? {};
+  const bonus = (evaluateFormulaNumber(hpBonuses.level, rollData) * level)
+    + evaluateFormulaNumber(hpBonuses.overall, rollData);
+  return Math.max(Math.floor(classHp + bonus), 0);
+}
+
+function gestaltProgressionMetrics(actor, scan = progressionScan(actor)) {
+  if (!scan?.gestaltEnabled || !scan.primary || !scan.secondary || !scan.gestaltHitDie) return null;
+  const primaryItem = primaryGestaltClassItem(actor, scan);
+  const secondaryItem = secondaryGestaltClassItem(actor, scan);
+  if (!primaryItem) return null;
+
+  const level = Math.max(Number(scan.primary.level) || 0, 1);
+  const hpMax = gestaltHpMax(actor, primaryItem, secondaryItem, scan.gestaltHitDie, level);
+  return {
+    actor,
+    scan,
+    primaryItem,
+    secondaryItem,
+    level,
+    hitDie: scan.gestaltHitDie,
+    denomination: `d${scan.gestaltHitDie}`,
+    hpMax
+  };
+}
+
+function createGestaltHitDiceData(metrics) {
+  const spent = Math.clamp(Number(metrics.primaryItem?.system?.hd?.spent ?? 0) || 0, 0, metrics.level);
+  const value = Math.max(metrics.level - spent, 0);
+  const bySize = { [metrics.denomination]: value };
+  const hitDiceClass = {
+    id: metrics.primaryItem.id,
+    name: metrics.primaryItem.name,
+    system: {
+      ...metrics.primaryItem.system,
+      hd: {
+        ...(metrics.primaryItem.system?.hd ?? {}),
+        denomination: metrics.denomination,
+        max: metrics.level,
+        value,
+        spent
+      }
+    },
+    update: (data, options) => metrics.primaryItem.update(data, options)
+  };
+  const classes = [hitDiceClass];
+  return {
+    actor: metrics.actor,
+    classes,
+    sizes: new Set([metrics.hitDie]),
+    value,
+    max: metrics.level,
+    bySize,
+    smallest: metrics.denomination,
+    largest: metrics.denomination,
+    smallestAvailable: value ? metrics.denomination : "d0",
+    largestAvailable: value ? metrics.denomination : "d0",
+    smallestFace: metrics.hitDie,
+    largestFace: metrics.hitDie,
+    pct: Math.clamp(metrics.level ? (value / metrics.level) * 100 : 0, 0, 100),
+    toString() {
+      return String(this.value);
+    },
+    createHitDiceUpdates({ maxHitDice, fraction = 0.5 } = {}, result = {}) {
+      const recoverLimit = Number.isInteger(maxHitDice) ? maxHitDice : Math.max(Math.floor(this.max * fraction), 1);
+      const recovered = Math.min(spent, recoverLimit);
+      if (recovered <= 0) return;
+      foundry.utils.mergeObject(result, {
+        deltas: {
+          hitDice: (result.deltas?.hitDice ?? 0) + recovered
+        },
+        updateItems: [{
+          _id: metrics.primaryItem.id,
+          "system.hd.spent": spent - recovered
+        }]
+      });
+    }
+  };
+}
+
+function applyGestaltBaseDataCorrections(actor) {
+  if (!actor || actor.type !== "character" || !isEnabled("gestalt-dichotomous")) return;
+  const metrics = gestaltProgressionMetrics(actor);
+  if (!metrics) return;
+
+  const system = actor.system;
+  if (!system?.details || !system?.attributes) return;
+
+  system.details.level = metrics.level;
+  system.attributes.prof = proficiencyBonusForLevel(metrics.level);
+}
+
+function applyGestaltPreparedDataCorrections(actor) {
+  if (!actor || actor.type !== "character" || !isEnabled("gestalt-dichotomous")) return;
+  const metrics = gestaltProgressionMetrics(actor);
+  if (!metrics) return;
+
+  const system = actor.system;
+  const hp = system?.attributes?.hp;
+  if (!system?.details || !system?.attributes || !hp) return;
+  system.details.level = metrics.level;
+  system.attributes.prof = proficiencyBonusForLevel(metrics.level);
+  system.attributes.hd = createGestaltHitDiceData(metrics);
+
+  if (metrics.hpMax !== null) {
+    hp.max = metrics.hpMax;
+    if (actor.hasConditionEffect?.("halfHealth")) hp.max = Math.floor(hp.max * 0.5);
+    hp.effectiveMax = Math.max(hp.max + (Number(hp.tempmax) || 0), 0);
+    hp.value = Math.min(Number(hp.value) || 0, hp.effectiveMax);
+    hp.damage = hp.effectiveMax - hp.value;
+    hp.pct = Math.clamp(hp.effectiveMax ? (hp.value / hp.effectiveMax) * 100 : 0, 0, 100);
+  }
+}
+
+function patchGestaltPreparedData() {
+  const CharacterData = CONFIG?.Actor?.dataModels?.character;
+  if (CharacterData?.prototype?.prepareBaseData && CharacterData?.prototype?.prepareDerivedData) {
+    if (!CharacterData.prototype[GESTALT_BASE_PATCH_FLAG]) {
+      const originalPrepareBaseData = CharacterData.prototype.prepareBaseData;
+      CharacterData.prototype.prepareBaseData = function swvrPrepareBaseData(...args) {
+        const result = originalPrepareBaseData.apply(this, args);
+        try {
+          applyGestaltBaseDataCorrections(this.parent);
+        } catch (error) {
+          console.error(`${MODULE_ID} | Failed to apply Gestalt base-data corrections.`, error);
+        }
+        return result;
+      };
+      CharacterData.prototype[GESTALT_BASE_PATCH_FLAG] = true;
+    }
+
+    if (!CharacterData.prototype[GESTALT_DERIVED_PATCH_FLAG]) {
+      const originalPrepareDerivedData = CharacterData.prototype.prepareDerivedData;
+      CharacterData.prototype.prepareDerivedData = function swvrPrepareDerivedData(...args) {
+        const result = originalPrepareDerivedData.apply(this, args);
+        try {
+          applyGestaltPreparedDataCorrections(this.parent);
+        } catch (error) {
+          console.error(`${MODULE_ID} | Failed to apply Gestalt derived-data corrections.`, error);
+        }
+        return result;
+      };
+      CharacterData.prototype[GESTALT_DERIVED_PATCH_FLAG] = true;
+    }
+  }
+
+  const ActorClass = CONFIG?.Actor?.documentClass;
+  if (!ActorClass?.prototype?.prepareData || ActorClass.prototype[GESTALT_PREPARED_PATCH_FLAG]) return;
+  const originalPrepareData = ActorClass.prototype.prepareData;
+  ActorClass.prototype.prepareData = function swvrPrepareData(...args) {
+    const result = originalPrepareData.apply(this, args);
+    try {
+      applyGestaltPreparedDataCorrections(this);
+    } catch (error) {
+      console.error(`${MODULE_ID} | Failed to apply Gestalt prepared-data corrections.`, error);
+    }
+    return result;
+  };
+  ActorClass.prototype[GESTALT_PREPARED_PATCH_FLAG] = true;
+}
+
+function reprepareGestaltActors() {
+  for (const actor of game.actors ?? []) {
+    if (actor.type !== "character") continue;
+    const scan = progressionScan(actor);
+    if (!scan.gestaltEnabled) continue;
+    actor.prepareData();
+    actor.sheet?.rendered && actor.sheet.render(false);
+    for (const app of Object.values(actor.apps ?? {})) app?.render?.(false);
+  }
+}
+
 function classRole(item) {
   const text = normalizeKeywordText(`${item?.name ?? ""} ${stripHtml(itemDescriptionText(item))}`);
   if (/\b(consular|guardian|sentinel)\b/.test(text) || /\bforcecasting\b/.test(text)) return "force";
@@ -767,14 +1220,34 @@ function classRole(item) {
 }
 
 function classOptionData(actor) {
-  return classItems(actor).map((item) => ({
+  const realClasses = classItems(actor).map((item) => ({
     id: item.id,
     uuid: item.uuid,
     name: item.name,
     level: itemLevelValue(item),
     hitDie: hitDieSize(item),
-    role: classRole(item)
+    role: classRole(item),
+    counting: true,
+    reference: false,
+    itemType: item.type
   }));
+  const references = progressionClassReferenceItems(actor).map((item) => {
+    const data = progressionClassReferenceData(item) ?? {};
+    return {
+      id: item.id,
+      uuid: item.uuid,
+      name: data.name ?? item.name?.replace(`${PROGRESSION_CLASS_REFERENCE_PREFIX}: `, "") ?? item.name,
+      level: Number(data.level ?? 0),
+      hitDie: Number(data.hitDie ?? 0) || null,
+      role: data.role ?? "none",
+      counting: false,
+      reference: true,
+      itemType: item.type,
+      sourceItemId: data.sourceItemId,
+      sourceUuid: data.sourceUuid
+    };
+  });
+  return [...realClasses, ...references];
 }
 
 function subclassClassHint(item) {
@@ -791,12 +1264,20 @@ function subclassClassHint(item) {
 }
 
 function subclassOptionData(actor) {
-  return subclassItems(actor).map((item) => ({
-    id: item.id,
-    uuid: item.uuid,
-    name: item.name,
-    classHint: subclassClassHint(item)
-  }));
+  return subclassItems(actor).map((item) => {
+    const reference = progressionArchetypeReferenceData(item);
+    return {
+      id: item.id,
+      uuid: item.uuid,
+      name: reference?.name ?? item.name?.replace(`${PROGRESSION_ARCHETYPE_REFERENCE_PREFIX}: `, "") ?? item.name,
+      classHint: reference
+        ? `${reference.className ?? "SWVR class track"}; reference from ${reference.sourceName ?? reference.name ?? item.name}`
+        : subclassClassHint(item),
+      reference: Boolean(reference),
+      classTrackId: reference?.classTrackId ?? "",
+      sourceUuid: reference?.sourceUuid ?? item.uuid
+    };
+  });
 }
 
 function progressionModeLabel(mode) {
@@ -813,6 +1294,26 @@ function progressionSourceLabel(source, primary, secondary) {
   return primary?.name ?? "Primary class";
 }
 
+function progressionClassOptionLabel(item) {
+  const countLabel = item.reference ? "reference" : "counts";
+  return `${item.name} (level ${item.level || "?"}${item.hitDie ? `, d${item.hitDie}` : ""}; ${countLabel})`;
+}
+
+function progressionClassArchetypeIds(state, classId) {
+  if (!classId) return [];
+  const values = state.gestaltArchetypeIds?.[classId] ?? [];
+  return Array.isArray(values) ? values : [];
+}
+
+function selectedArchetypesForClass(archetypes, state, classId) {
+  const ids = new Set(progressionClassArchetypeIds(state, classId));
+  return archetypes.filter((item) => ids.has(item.id));
+}
+
+function selectedGestaltArchetypeIds(state, classIds) {
+  return classIds.flatMap((classId) => progressionClassArchetypeIds(state, classId));
+}
+
 function progressionScan(actor) {
   const state = progressionState(actor);
   const classes = classOptionData(actor);
@@ -821,20 +1322,45 @@ function progressionScan(actor) {
   const secondary = classes.find((item) => item.id === state.secondaryClassId) ?? classes.find((item) => item.id !== primary?.id) ?? null;
   const dichotomousClass = classes.find((item) => item.id === state.dichotomousClassId) ?? primary ?? null;
   const selectedArchetypes = archetypes.filter((item) => state.archetypeIds?.includes(item.id));
+  const primaryArchetypes = selectedArchetypesForClass(archetypes, state, primary?.id);
+  const secondaryArchetypes = selectedArchetypesForClass(archetypes, state, secondary?.id);
+  const gestaltClassArchetypes = [
+    primary ? { role: "Primary", classItem: primary, archetypes: primaryArchetypes } : null,
+    secondary ? { role: "Secondary", classItem: secondary, archetypes: secondaryArchetypes } : null
+  ].filter(Boolean);
+  const gestaltArchetypeIds = selectedGestaltArchetypeIds(state, gestaltClassArchetypes.map((entry) => entry.classItem.id));
+  const duplicateGestaltArchetypeIds = [...new Set(gestaltArchetypeIds.filter((id, index, ids) => ids.indexOf(id) !== index))];
   const gestaltEnabled = state.mode === "gestalt" || state.mode === "both";
   const dichotomousEnabled = state.mode === "dichotomous" || state.mode === "both";
   const warnings = [];
   const recommendations = [];
   const details = [];
+  const countedClasses = classes.filter((item) => item.counting);
+  const rawClassLevelTotal = countedClasses.reduce((total, item) => total + (Number(item.level) || 0), 0);
+  let gestaltHitDie = null;
 
   if (gestaltEnabled) {
     if (!primary || !secondary) warnings.push("Choose two class tracks for Gestalt progression.");
     if (primary && secondary && primary.id === secondary.id) warnings.push("Gestalt requires two different classes.");
-    if (classes.length > 2) warnings.push("Gestalt characters are not suitable for multiclassing; this actor has more than two class items.");
+    if (countedClasses.length > 2) warnings.push("Gestalt characters are not suitable for multiclassing; this actor has more than two counted class items.");
+    if (primary && !primary.counting) warnings.push("The primary Gestalt class should remain a real counted class item.");
+    if (secondary?.reference) recommendations.push(`${secondary.name} is tracked as an SWVR reference. For full class features and two-subclass testing, add it back as a real class item and select it as the secondary Gestalt class.`);
     if (primary && secondary && primary.level !== secondary.level) warnings.push(`${primary.name} is level ${primary.level}, while ${secondary.name} is level ${secondary.level}. Gestalt class tracks should advance together.`);
 
-    const hitDie = averagedHitDie(primary?.hitDie, secondary?.hitDie);
-    if (hitDie) details.push(`Gestalt Hit Die: d${hitDie} from ${primary.name} d${primary.hitDie} and ${secondary.name} d${secondary.hitDie}.`);
+    gestaltHitDie = averagedHitDie(primary?.hitDie, secondary?.hitDie);
+    if (gestaltHitDie) {
+      details.push(`Gestalt Hit Die: d${gestaltHitDie} from ${primary.name} d${primary.hitDie} and ${secondary.name} d${secondary.hitDie}.`);
+      if (primary?.counting && secondary?.counting) {
+        const primaryItem = primaryGestaltClassItem(actor, { primary });
+        const secondaryItem = secondaryGestaltClassItem(actor, { secondary });
+        const hpMax = gestaltHpMax(actor, primaryItem, secondaryItem, gestaltHitDie, Math.max(Number(primary.level) || 0, 1));
+        details.push(`Gestalt effective level: ${primary.level}. Raw Foundry class-level total is ${rawClassLevelTotal}; SWVR corrects prepared level, proficiency, HP, and hit dice after D&D5e preparation.`);
+        if (hpMax !== null) details.push(`Gestalt HP max: ${hpMax} using ${primary.name}'s HP choices evaluated against d${gestaltHitDie}.`);
+        recommendations.push("Use Sync Gestalt Class Hit Dice so rests and hit-die rolls use one averaged hit-die pool while both classes remain on the actor.");
+      } else if (primary?.counting) {
+        recommendations.push(`Apply d${gestaltHitDie} to the counted primary class item so Foundry uses the Gestalt hit die instead of ${primary.name}'s normal d${primary.hitDie}.`);
+      }
+    }
     else details.push("Gestalt Hit Die: unable to calculate because one or both class hit dice were not detected.");
 
     const xpMax = Number(getActorSystem(actor, "details.xp.max") ?? getActorSystem(actor, "details.xp.next") ?? 0);
@@ -859,18 +1385,39 @@ function progressionScan(actor) {
     details.push(`Skill source: ${progressionSourceLabel(state.skillSource, primary, secondary)}.`);
     details.push("Weapons, armor, and tools: grant proficiencies from both Gestalt classes.");
     details.push(`Starting equipment source: ${progressionSourceLabel(state.equipmentSource, primary, secondary)}.`);
+    if (secondary?.reference) details.push(`${secondary.name} is tracked as an SWVR reference and does not add Foundry class levels, hit dice, or HP.`);
   }
 
   if (dichotomousEnabled) {
-    if (!dichotomousClass) warnings.push("Choose the class that receives two archetypes.");
-    if (selectedArchetypes.length < 2) warnings.push("Choose two archetypes for Dichotomous progression.");
-    if (selectedArchetypes.length > 2) warnings.push("More than two archetypes are selected; the rule expects two.");
     const grantText = state.archetypeGrantMode === "choose"
       ? "At each archetype feature level, choose one archetype's feature."
       : "At each archetype feature level, grant features from both archetypes.";
-    recommendations.push(`${progressionModeLabel(state.mode)} archetype handling: ${grantText}`);
-    if (selectedArchetypes.length) details.push(`Selected archetypes: ${selectedArchetypes.map((item) => item.name).join(", ")}.`);
-    if (state.mode === "dichotomous" && classes.length > 1) warnings.push("Dichotomous multiclassing needs GM adjudication if more than one class reaches archetype levels.");
+    if (state.mode === "both") {
+      if (!primary || !secondary) warnings.push("Gestalt + Dichotomous requires two class tracks before assigning archetypes.");
+      details.push(`Gestalt + Dichotomous archetypes selected: ${gestaltArchetypeIds.length}/4 total, with 2 expected under each Gestalt class.`);
+      if (duplicateGestaltArchetypeIds.length) {
+        const duplicateNames = archetypes.filter((item) => duplicateGestaltArchetypeIds.includes(item.id)).map((item) => item.name);
+        warnings.push(`Each Gestalt + Dichotomous archetype slot should point to a distinct archetype item. Repeated selection: ${duplicateNames.join(", ")}.`);
+      }
+      for (const entry of gestaltClassArchetypes) {
+        if (entry.archetypes.length < 2) warnings.push(`${entry.classItem.name} needs two archetypes for Gestalt + Dichotomous progression.`);
+        if (entry.archetypes.length > 2) warnings.push(`${entry.classItem.name} has more than two archetypes selected; the rule expects two.`);
+        if (entry.archetypes.length) {
+          details.push(`${entry.role} class archetypes (${entry.classItem.name}) ${entry.archetypes.length}/2: ${entry.archetypes.map((item) => item.name).join(", ")}.`);
+        }
+      }
+      if (gestaltArchetypeIds.length === 4 && !duplicateGestaltArchetypeIds.length) {
+        details.push("Gestalt + Dichotomous archetype requirement is complete: four total archetypes, two under each class track.");
+      }
+      recommendations.push(`Gestalt + Dichotomous archetype handling: allow four total archetypes at 3rd level, two under each Gestalt class track. ${grantText}`);
+    } else {
+      if (!dichotomousClass) warnings.push("Choose the class that receives two archetypes.");
+      if (selectedArchetypes.length < 2) warnings.push("Choose two archetypes for Dichotomous progression.");
+      if (selectedArchetypes.length > 2) warnings.push("More than two archetypes are selected; the rule expects two.");
+      recommendations.push(`${progressionModeLabel(state.mode)} archetype handling: ${grantText}`);
+      if (selectedArchetypes.length) details.push(`Selected archetypes: ${selectedArchetypes.map((item) => item.name).join(", ")}.`);
+      if (state.mode === "dichotomous" && classes.length > 1) warnings.push("Dichotomous multiclassing needs GM adjudication if more than one class reaches archetype levels.");
+    }
   }
 
   if (state.mode === "normal") details.push("Normal progression selected. No Gestalt or Dichotomous adjustments are active.");
@@ -883,8 +1430,12 @@ function progressionScan(actor) {
     secondary,
     dichotomousClass,
     selectedArchetypes,
+    gestaltClassArchetypes,
+    gestaltArchetypeIds,
+    duplicateGestaltArchetypeIds,
     gestaltEnabled,
     dichotomousEnabled,
+    gestaltHitDie,
     warnings,
     recommendations,
     details
@@ -939,6 +1490,273 @@ async function createOrUpdateProgressionNote(actor) {
     await actor.createEmbeddedDocuments("Item", [itemData]);
     ui.notifications.info("SWVR progression note created.");
   }
+}
+
+function confirmDialog({ title, content, yes = "Confirm", no = "Cancel" }) {
+  return new Promise((resolve) => {
+    new Dialog({
+      title,
+      content,
+      buttons: {
+        yes: {
+          icon: '<i class="fas fa-check"></i>',
+          label: yes,
+          callback: () => resolve(true)
+        },
+        no: {
+          icon: '<i class="fas fa-times"></i>',
+          label: no,
+          callback: () => resolve(false)
+        }
+      },
+      default: "no",
+      close: () => resolve(false)
+    }).render(true);
+  });
+}
+
+function progressionReferenceDescription(classItem, data) {
+  return [
+    `<p><strong>${escapeHtml(classItem.name)}</strong> is tracked by SW5e Variant Rules as a Gestalt class reference.</p>`,
+    "<p>This item is intentionally not a class item, so Foundry does not add its levels, hit dice, HP, or class-derived totals to the actor.</p>",
+    "<ul>",
+    `<li>Tracked level: ${escapeHtml(data.level)}</li>`,
+    `<li>Tracked hit die: ${data.hitDie ? `d${escapeHtml(data.hitDie)}` : "not detected"}</li>`,
+    `<li>Tracked casting role: ${escapeHtml(data.role)}</li>`,
+    "</ul>"
+  ].join("");
+}
+
+function progressionArchetypeReferenceDescription(sourceItem, classItem, data) {
+  return [
+    `<p><strong>${escapeHtml(sourceItem.name)}</strong> is tracked by SW5e Variant Rules as an additional Gestalt + Dichotomous archetype for <strong>${escapeHtml(classItem.name)}</strong>.</p>`,
+    "<p>This item is intentionally stored as a feature reference instead of a native archetype/subclass item because the SW5e/D&D5e actor sheet permits only one native archetype per class.</p>",
+    "<p>Use this reference for SWVR Progression tracking. Class and archetype features still need GM review before adding them to the actor.</p>"
+  ].join("");
+}
+
+async function createGestaltArchetypeReference(actor, classTrackId, sourceUuid) {
+  if (!actor || !game.user.isGM) return null;
+  const classItem = actor.items.get(classTrackId);
+  if (!classItem) {
+    ui.notifications.warn("Choose a Gestalt class track before importing an archetype reference.");
+    return null;
+  }
+  const sourceItem = await fromUuid(String(sourceUuid ?? "").trim());
+  if (!sourceItem) {
+    ui.notifications.warn("Could not find that archetype UUID.");
+    return null;
+  }
+
+  const typeText = normalizeKeywordText(`${sourceItem.type ?? ""} ${sourceItem.system?.type?.value ?? ""} ${sourceItem.system?.type ?? ""} ${sourceItem.name ?? ""}`);
+  if (sourceItem.type !== "subclass" && !/\b(subclass|archetype)\b/.test(typeText)) {
+    ui.notifications.warn(`${sourceItem.name} does not look like an archetype/subclass item.`);
+    return null;
+  }
+
+  const existing = progressionArchetypeReferenceItems(actor).find((item) => {
+    const data = progressionArchetypeReferenceData(item);
+    return data?.classTrackId === classTrackId && data?.sourceUuid === sourceItem.uuid;
+  });
+  const state = progressionState(actor);
+  state.gestaltArchetypeIds ??= {};
+  state.gestaltArchetypeIds[classTrackId] ??= [];
+  if (existing) {
+    if (!state.gestaltArchetypeIds[classTrackId].includes(existing.id)) {
+      state.gestaltArchetypeIds[classTrackId].push(existing.id);
+      await actor.setFlag(MODULE_ID, "progression", state);
+    }
+    ui.notifications.info(`${sourceItem.name} is already imported for ${classItem.name}.`);
+    return existing;
+  }
+
+  const data = {
+    name: sourceItem.name,
+    sourceName: sourceItem.name,
+    sourceUuid: sourceItem.uuid,
+    sourceType: sourceItem.type,
+    classTrackId,
+    className: classItem.name,
+    classIdentifier: sourceItem.system?.classIdentifier ?? classItem.system?.identifier ?? "",
+    importedAt: new Date().toISOString()
+  };
+  const created = await actor.createEmbeddedDocuments("Item", [{
+    name: `${PROGRESSION_ARCHETYPE_REFERENCE_PREFIX}: ${sourceItem.name}`,
+    type: "feat",
+    img: sourceItem.img,
+    system: {
+      description: {
+        value: progressionArchetypeReferenceDescription(sourceItem, classItem, data)
+      }
+    },
+    flags: {
+      [MODULE_ID]: {
+        gestaltArchetypeReference: data
+      }
+    }
+  }]);
+  const reference = created?.[0] ?? null;
+  if (reference) {
+    state.gestaltArchetypeIds[classTrackId].push(reference.id);
+    await actor.setFlag(MODULE_ID, "progression", state);
+    ui.notifications.info(`${sourceItem.name} imported as an SWVR archetype reference for ${classItem.name}.`);
+  }
+  return reference;
+}
+
+function progressionStateUsesArchetype(state, archetypeId) {
+  if (state.archetypeIds?.includes(archetypeId)) return true;
+  return Object.values(state.gestaltArchetypeIds ?? {}).some((ids) => Array.isArray(ids) && ids.includes(archetypeId));
+}
+
+async function removeProgressionArchetype(actor, archetypeId, classTrackId = "") {
+  if (!actor || !game.user.isGM) return;
+  const item = actor.items.get(archetypeId);
+  const reference = progressionArchetypeReferenceData(item);
+  const confirmed = await confirmDialog({
+    title: "Remove Archetype",
+    content: reference
+      ? `<p>Remove <strong>${escapeHtml(reference.name ?? item?.name ?? "this archetype")}</strong> from this progression slot?</p><p>This SWVR archetype reference will be deleted from the actor if no other slot uses it.</p>`
+      : `<p>Remove <strong>${escapeHtml(item?.name ?? "this archetype")}</strong> from this SWVR progression slot?</p><p>The native archetype item will remain on the actor.</p>`,
+    yes: "Remove"
+  });
+  if (!confirmed) return;
+
+  const state = progressionState(actor);
+  state.archetypeIds = (state.archetypeIds ?? []).filter((id) => id !== archetypeId);
+  state.gestaltArchetypeIds ??= {};
+  if (classTrackId) {
+    state.gestaltArchetypeIds[classTrackId] = (state.gestaltArchetypeIds[classTrackId] ?? []).filter((id) => id !== archetypeId);
+  } else {
+    for (const [id, ids] of Object.entries(state.gestaltArchetypeIds)) {
+      state.gestaltArchetypeIds[id] = (ids ?? []).filter((value) => value !== archetypeId);
+    }
+  }
+
+  await actor.setFlag(MODULE_ID, "progression", state);
+  if (reference && item && !progressionStateUsesArchetype(state, archetypeId)) {
+    await actor.deleteEmbeddedDocuments("Item", [item.id]);
+    ui.notifications.info(`${reference.name ?? item.name} removed from SWVR progression and deleted as a reference.`);
+  } else {
+    ui.notifications.info(`${item?.name ?? "Archetype"} removed from SWVR progression.`);
+  }
+}
+
+async function convertGestaltClassToReference(actor, classItemId) {
+  if (!actor || !game.user.isGM) return null;
+  const classItem = actor.items.get(classItemId);
+  if (!classItem || classItem.type !== "class") {
+    ui.notifications.warn("Choose a real class item to convert into an SWVR Gestalt reference.");
+    return null;
+  }
+
+  const data = {
+    name: classItem.name,
+    sourceItemId: classItem.id,
+    sourceUuid: classItem.uuid,
+    level: itemLevelValue(classItem),
+    hitDie: hitDieSize(classItem),
+    role: classRole(classItem),
+    convertedAt: new Date().toISOString()
+  };
+
+  const confirmed = await confirmDialog({
+    title: "Convert Gestalt Class",
+    content: `<p>Convert <strong>${escapeHtml(classItem.name)}</strong> into a non-counting SWVR Gestalt class reference?</p><p>The original class item will be removed so Foundry stops adding its levels, hit dice, and HP. Any class features that were granted from that item should be reviewed manually.</p>`,
+    yes: "Convert"
+  });
+  if (!confirmed) return null;
+
+  const created = await actor.createEmbeddedDocuments("Item", [{
+    name: `${PROGRESSION_CLASS_REFERENCE_PREFIX}: ${classItem.name}`,
+    type: "feat",
+    system: {
+      description: {
+        value: progressionReferenceDescription(classItem, data)
+      }
+    },
+    flags: {
+      [MODULE_ID]: {
+        gestaltClassReference: data
+      }
+    }
+  }]);
+  const reference = created?.[0] ?? null;
+  if (reference) {
+    const state = progressionState(actor);
+    if (state.primaryClassId === classItem.id) state.primaryClassId = "";
+    if (state.secondaryClassId === classItem.id) state.secondaryClassId = reference.id;
+    await actor.setFlag(MODULE_ID, "progression", state);
+  }
+  await actor.deleteEmbeddedDocuments("Item", [classItem.id]);
+  ui.notifications.info(`${classItem.name} converted to an SWVR Gestalt class reference.`);
+  return reference;
+}
+
+async function applyGestaltHitDieToPrimary(actor) {
+  if (!actor || !game.user.isGM) return null;
+  const scan = progressionScan(actor);
+  const classItem = primaryGestaltClassItem(actor, scan);
+  const hitDie = scan.gestaltHitDie;
+
+  if (!scan.gestaltEnabled || !scan.primary || !scan.secondary || !hitDie) {
+    ui.notifications.warn("Choose two Gestalt class tracks with detectable hit dice before applying the Gestalt hit die.");
+    return null;
+  }
+  if (!classItem) {
+    ui.notifications.warn("The primary Gestalt class must be a real class item before its hit die can be updated.");
+    return null;
+  }
+  if (scan.primary.hitDie === hitDie) {
+    ui.notifications.info(`${classItem.name} already uses the calculated Gestalt hit die d${hitDie}.`);
+    return classItem;
+  }
+
+  const confirmed = await confirmDialog({
+    title: "Apply Gestalt Hit Die",
+    content: `<p>Set <strong>${escapeHtml(classItem.name)}</strong> to use a d${hitDie} hit die?</p><p>This applies the rule average of ${escapeHtml(scan.primary.name)} d${escapeHtml(scan.primary.hitDie)} and ${escapeHtml(scan.secondary.name)} d${escapeHtml(scan.secondary.hitDie)}. Existing hit point totals and prior level HP choices should still be reviewed manually after the update.</p>`,
+    yes: "Apply d" + hitDie
+  });
+  if (!confirmed) return null;
+
+  await classItem.update({ "system.hd.denomination": `d${hitDie}` });
+  ui.notifications.info(`${classItem.name} updated to Gestalt hit die d${hitDie}. Review current HP totals before play.`);
+  return classItem;
+}
+
+async function syncGestaltClassHitDice(actor) {
+  if (!actor || !game.user.isGM) return null;
+  const scan = progressionScan(actor);
+  const metrics = gestaltProgressionMetrics(actor, scan);
+  if (!metrics?.secondaryItem) {
+    ui.notifications.warn("Choose two real Gestalt class items before syncing Gestalt hit dice.");
+    return null;
+  }
+
+  const confirmed = await confirmDialog({
+    title: "Sync Gestalt Class Hit Dice",
+    content: `<p>Sync <strong>${escapeHtml(metrics.primaryItem.name)}</strong> and <strong>${escapeHtml(metrics.secondaryItem.name)}</strong> for Gestalt hit dice?</p><p>The primary class will use ${escapeHtml(metrics.denomination)} for ${escapeHtml(metrics.level)} hit dice. The secondary class remains a real class item for features, but its hit-dice contribution is set to 0 so Foundry does not add the two pools together.</p><p>Prepared HP max is recalculated automatically from the averaged die while the variant rule is enabled.</p>`,
+    yes: "Sync Hit Dice"
+  });
+  if (!confirmed) return null;
+
+  const secondaryLevel = Number(metrics.secondaryItem.system?.levels ?? metrics.scan.secondary.level ?? 0) || 0;
+  const updates = [
+    {
+      _id: metrics.primaryItem.id,
+      "system.hd.denomination": metrics.denomination,
+      "system.hd.additional": ""
+    },
+    {
+      _id: metrics.secondaryItem.id,
+      "system.hd.denomination": metrics.denomination,
+      "system.hd.additional": secondaryLevel ? `-${secondaryLevel}` : ""
+    }
+  ];
+  await actor.updateEmbeddedDocuments("Item", updates);
+  actor.prepareData();
+  ui.notifications.info(`Gestalt hit dice synced to ${metrics.denomination}. ${metrics.primaryItem.name} supplies the active pool; ${metrics.secondaryItem.name} remains counted for class features.`);
+  return updates;
 }
 
 function forceAlignmentState(actor) {
@@ -1966,17 +2784,70 @@ class CharacterProgressionPanel extends Application {
     const primaryId = state.primaryClassId || scan.primary?.id || "";
     const secondaryId = state.secondaryClassId || scan.secondary?.id || "";
     const dichotomousClassId = state.dichotomousClassId || scan.dichotomousClass?.id || "";
-    const classOptions = scan.classes.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === primaryId ? "selected" : ""}>${escapeHtml(item.name)} (level ${item.level || "?"}${item.hitDie ? `, d${item.hitDie}` : ""})</option>`).join("");
-    const secondaryOptions = scan.classes.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === secondaryId ? "selected" : ""}>${escapeHtml(item.name)} (level ${item.level || "?"}${item.hitDie ? `, d${item.hitDie}` : ""})</option>`).join("");
-    const dichotomousOptions = scan.classes.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === dichotomousClassId ? "selected" : ""}>${escapeHtml(item.name)} (level ${item.level || "?"})</option>`).join("");
+    const classOptions = scan.classes.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === primaryId ? "selected" : ""}>${escapeHtml(progressionClassOptionLabel(item))}</option>`).join("");
+    const secondaryOptions = scan.classes.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === secondaryId ? "selected" : ""}>${escapeHtml(progressionClassOptionLabel(item))}</option>`).join("");
+    const dichotomousOptions = scan.classes.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === dichotomousClassId ? "selected" : ""}>${escapeHtml(progressionClassOptionLabel(item))}</option>`).join("");
+    const syncHitDiceHtml = (scan.gestaltEnabled && scan.primary?.counting && scan.secondary?.counting && scan.gestaltHitDie)
+      ? `<button type="button" class="sw5e-vr-progression-hitdie" data-action="sync-gestalt-hit-dice"><i class="fas fa-dice-d20"></i> Sync Gestalt Class Hit Dice</button><p class="notes">Keeps both class items real, sets the active hit-die pool to d${escapeHtml(scan.gestaltHitDie)}, and zeroes the secondary class's hit-dice contribution so Foundry does not add both pools.</p>`
+      : "";
+    const applyHitDieHtml = (scan.gestaltEnabled && scan.primary?.counting && scan.secondary && !scan.secondary?.counting && scan.gestaltHitDie && scan.primary.hitDie !== scan.gestaltHitDie)
+      ? `<button type="button" class="sw5e-vr-progression-hitdie" data-action="apply-gestalt-hit-die"><i class="fas fa-dice-d20"></i> Apply Gestalt Hit Die d${escapeHtml(scan.gestaltHitDie)} to Primary Class</button><p class="notes">Legacy reference workflow only. For new Gestalt actors, keep both classes real and use Sync Gestalt Class Hit Dice instead.</p>`
+      : "";
     const archetypeRows = scan.archetypes.length
-      ? scan.archetypes.map((item) => `
-        <label class="sw5e-vr-progression-check">
-          <input type="checkbox" name="archetypeIds" value="${escapeHtml(item.id)}" ${state.archetypeIds?.includes(item.id) ? "checked" : ""}>
-          <span><strong>${escapeHtml(item.name)}</strong>${item.classHint ? `<small>${escapeHtml(item.classHint)}</small>` : ""}</span>
-        </label>
-      `).join("")
+      ? scan.archetypes.map((item) => {
+        const selected = state.archetypeIds?.includes(item.id);
+        return `
+          <div class="sw5e-vr-progression-archetype-row">
+            <label class="sw5e-vr-progression-check">
+              <input type="checkbox" name="archetypeIds" value="${escapeHtml(item.id)}" ${selected ? "checked" : ""}>
+              <span><strong>${escapeHtml(item.name)}</strong>${item.classHint ? `<small>${escapeHtml(item.classHint)}</small>` : ""}</span>
+            </label>
+            ${selected ? `<button type="button" data-action="remove-archetype" data-archetype-id="${escapeHtml(item.id)}" title="Remove Archetype"><i class="fas fa-trash"></i></button>` : ""}
+          </div>
+        `;
+      }).join("")
       : `<p class="notes">No archetype/subclass items were detected on this actor. Add the archetype items first, then scan again.</p>`;
+    const gestaltArchetypeRows = scan.gestaltClassArchetypes.length && scan.archetypes.length
+      ? scan.gestaltClassArchetypes.map((entry) => {
+        const selectedIds = new Set(progressionClassArchetypeIds(state, entry.classItem.id));
+        const selectedCount = selectedIds.size;
+        const rows = scan.archetypes.map((item) => {
+          const selected = selectedIds.has(item.id);
+          return `
+            <div class="sw5e-vr-progression-archetype-row">
+              <label class="sw5e-vr-progression-check">
+                <input type="checkbox" name="gestaltArchetypeIds" data-class-id="${escapeHtml(entry.classItem.id)}" value="${escapeHtml(item.id)}" ${selected ? "checked" : ""}>
+                <span><strong>${escapeHtml(item.name)}</strong>${item.classHint ? `<small>${escapeHtml(item.classHint)}</small>` : ""}</span>
+              </label>
+              ${selected ? `<button type="button" data-action="remove-archetype" data-class-id="${escapeHtml(entry.classItem.id)}" data-archetype-id="${escapeHtml(item.id)}" title="Remove Archetype"><i class="fas fa-trash"></i></button>` : ""}
+            </div>
+          `;
+        }).join("");
+        return `
+          <div class="sw5e-vr-progression-class-archetypes" data-class-id="${escapeHtml(entry.classItem.id)}">
+            <h4>${escapeHtml(entry.role)} Class: ${escapeHtml(entry.classItem.name)} <span>${escapeHtml(selectedCount)}/2</span></h4>
+            <p class="notes">Choose exactly two archetypes for this class track.</p>
+            <div class="sw5e-vr-progression-import">
+              <input type="text" data-class-id="${escapeHtml(entry.classItem.id)}" name="archetypeUuid-${escapeHtml(entry.classItem.id)}" placeholder="Drop archetype here or paste UUID">
+              <button type="button" data-action="import-archetype" data-class-id="${escapeHtml(entry.classItem.id)}" title="Import Archetype"><i class="fas fa-file-import"></i></button>
+            </div>
+            ${rows}
+          </div>
+        `;
+      }).join("")
+      : `<p class="notes">Add two Gestalt class tracks and archetype/subclass items, then scan again.</p>`;
+    const gestaltArchetypeSummaryHtml = state.mode === "both"
+      ? `<p class="notes">Gestalt + Dichotomous expects four total archetypes: two under ${escapeHtml(scan.primary?.name ?? "the primary class")} and two under ${escapeHtml(scan.secondary?.name ?? "the secondary class")}. Current total: ${escapeHtml(scan.gestaltArchetypeIds.length)}/4.</p>`
+      : "";
+    const archetypeSelectionHtml = state.mode === "both"
+      ? gestaltArchetypeRows
+      : `
+        <div class="form-group">
+          <label>Class</label>
+          <select name="dichotomousClassId">${dichotomousOptions || `<option value="">No classes detected</option>`}</select>
+        </div>
+        <div class="sw5e-vr-progression-archetypes">${archetypeRows}</div>
+      `;
     const warningHtml = scan.warnings.length
       ? `<section class="sw5e-vr-progression-warnings"><h3>Warnings</h3><ul>${scan.warnings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>`
       : `<section class="sw5e-vr-progression-ok"><h3>Warnings</h3><p>No blocking warnings detected.</p></section>`;
@@ -2011,6 +2882,8 @@ class CharacterProgressionPanel extends Application {
             <label>Secondary Class</label>
             <select name="secondaryClassId">${secondaryOptions || `<option value="">No classes detected</option>`}</select>
           </div>
+          ${syncHitDiceHtml}
+          ${applyHitDieHtml}
           <div class="form-group">
             <label>Saving Throws From</label>
             <select name="savingThrowSource">
@@ -2044,17 +2917,14 @@ class CharacterProgressionPanel extends Application {
         <fieldset>
           <legend>Dichotomous Archetypes</legend>
           <div class="form-group">
-            <label>Class</label>
-            <select name="dichotomousClassId">${dichotomousOptions || `<option value="">No classes detected</option>`}</select>
-          </div>
-          <div class="form-group">
             <label>Feature Grant Mode</label>
             <select name="archetypeGrantMode">
               <option value="both" ${state.archetypeGrantMode === "both" ? "selected" : ""}>Grant both archetypes at each feature level</option>
               <option value="choose" ${state.archetypeGrantMode === "choose" ? "selected" : ""}>Choose one archetype feature at each feature level</option>
             </select>
           </div>
-          <div class="sw5e-vr-progression-archetypes">${archetypeRows}</div>
+          ${gestaltArchetypeSummaryHtml}
+          ${archetypeSelectionHtml}
         </fieldset>
 
         <section class="sw5e-vr-progression-results">
@@ -2086,6 +2956,61 @@ class CharacterProgressionPanel extends Application {
       await createOrUpdateProgressionNote(this.actor);
       await this.refreshContent();
     });
+    html.find("[data-action='convert-secondary-class']").on("click", async (event) => {
+      event.preventDefault();
+      await this.saveFromForm(html, { notify: false });
+      const state = progressionState(this.actor);
+      await convertGestaltClassToReference(this.actor, state.secondaryClassId);
+      await this.refreshContent();
+    });
+    html.find("[data-action='apply-gestalt-hit-die']").on("click", async (event) => {
+      event.preventDefault();
+      await this.saveFromForm(html, { notify: false });
+      await applyGestaltHitDieToPrimary(this.actor);
+      await this.refreshContent();
+    });
+    html.find("[data-action='sync-gestalt-hit-dice']").on("click", async (event) => {
+      event.preventDefault();
+      await this.saveFromForm(html, { notify: false });
+      await syncGestaltClassHitDice(this.actor);
+      await this.refreshContent();
+    });
+    html.find("[data-action='import-archetype']").on("click", async (event) => {
+      event.preventDefault();
+      await this.saveFromForm(html, { notify: false });
+      const classId = event.currentTarget.dataset.classId;
+      const uuid = String(html.find(".sw5e-vr-progression-import input").toArray().find((input) => input.dataset.classId === classId)?.value ?? "").trim();
+      if (!uuid) {
+        ui.notifications.warn("Paste an archetype UUID or drop an archetype onto this class track.");
+        return;
+      }
+      await createGestaltArchetypeReference(this.actor, classId, uuid);
+      await this.refreshContent();
+    });
+    html.find("[data-action='remove-archetype']").on("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const archetypeId = event.currentTarget.dataset.archetypeId;
+      const classId = event.currentTarget.dataset.classId ?? "";
+      await removeProgressionArchetype(this.actor, archetypeId, classId);
+      await this.refreshContent();
+    });
+    html.find(".sw5e-vr-progression-class-archetypes").on("dragover", (event) => {
+      event.preventDefault();
+    });
+    html.find(".sw5e-vr-progression-class-archetypes").on("drop", async (event) => {
+      event.preventDefault();
+      await this.saveFromForm(html, { notify: false });
+      const classId = event.currentTarget.dataset.classId;
+      const data = TextEditor.getDragEventData(event.originalEvent ?? event);
+      const uuid = data?.uuid ?? data?.itemUuid ?? data?.documentUuid;
+      if (!uuid) {
+        ui.notifications.warn("Drop an archetype/subclass item or paste its UUID.");
+        return;
+      }
+      await createGestaltArchetypeReference(this.actor, classId, uuid);
+      await this.refreshContent();
+    });
   }
 
   async refreshContent() {
@@ -2102,6 +3027,13 @@ class CharacterProgressionPanel extends Application {
       return;
     }
     const archetypeIds = html.find("input[name='archetypeIds']:checked").toArray().map((input) => input.value);
+    const gestaltArchetypeIds = {};
+    for (const input of html.find("input[name='gestaltArchetypeIds']:checked").toArray()) {
+      const classId = input.dataset.classId;
+      if (!classId) continue;
+      gestaltArchetypeIds[classId] ??= [];
+      gestaltArchetypeIds[classId].push(input.value);
+    }
     const state = {
       mode: String(html.find("[name='mode']").val() ?? "normal"),
       primaryClassId: String(html.find("[name='primaryClassId']").val() ?? ""),
@@ -2112,9 +3044,11 @@ class CharacterProgressionPanel extends Application {
       asiMode: String(html.find("[name='asiMode']").val() ?? "single"),
       dichotomousClassId: String(html.find("[name='dichotomousClassId']").val() ?? ""),
       archetypeIds,
+      gestaltArchetypeIds,
       archetypeGrantMode: String(html.find("[name='archetypeGrantMode']").val() ?? "both")
     };
     await this.actor.setFlag(MODULE_ID, "progression", state);
+    this.actor.prepareData();
     if (notify) ui.notifications.info("SWVR progression configuration saved.");
   }
 }
@@ -2293,6 +3227,54 @@ function renderProgressionActorPanel(app, html) {
   }
 }
 
+function renderAlternativeArmorActorPanel(app, html) {
+  html = globalThis.jQuery && html instanceof jQuery ? html : $(html);
+  const actor = actorFromSheetApp(app);
+  if (!actor || !useModifiedActorSheet() || !isEnabled("alternative-armor")) return;
+  const host = app?.element
+    ? (globalThis.jQuery && app.element instanceof jQuery ? app.element : $(app.element))
+    : html.closest(".app");
+  host?.find?.(".sw5e-vr-alt-armor-sheet").remove();
+  html.find(".sw5e-vr-alt-armor-sheet").remove();
+
+  const summary = alternativeArmorSummary(actor);
+  const warning = summary.warnings.length ? `<span title="${escapeHtml(summary.warnings.join(" "))}">!</span>` : "";
+  const panel = $(`
+    <section class="sw5e-vr-alt-armor-sheet">
+      <div class="sw5e-vr-alt-armor-head">
+        <label>Alt Armor</label>
+        ${warning}
+      </div>
+      <div class="sw5e-vr-alt-armor-values" title="${escapeHtml(summary.details.concat(summary.warnings).join(" "))}">
+        <strong>AC ${summary.value}</strong>
+        <strong>DR ${summary.dr}</strong>
+      </div>
+      <small>${escapeHtml(summary.source)}${summary.currentAc ? ` (normal AC ${summary.currentAc})` : ""}</small>
+    </section>
+  `);
+
+  const progressionPanel = html.find(".sw5e-vr-progression-sheet").last();
+  if (progressionPanel.length) {
+    progressionPanel.after(panel);
+    return;
+  }
+
+  const forcePanel = html.find(".sw5e-vr-force-alignment-sheet").last();
+  if (forcePanel.length) {
+    forcePanel.after(panel);
+    return;
+  }
+
+  const hitDice = findSheetTextBlock(html, /hit\s*dice/i);
+  if (hitDice?.length) {
+    hitDice.after(panel);
+    return;
+  }
+
+  const armor = findSheetTextBlock(html, /armor/i);
+  if (armor?.length) armor.after(panel);
+}
+
 function safeRenderActorPanel(label, callback, app, html) {
   try {
     callback(app, html);
@@ -2370,9 +3352,14 @@ Hooks.once("init", () => {
     type: HuntedDisturbanceLog,
     restricted: true
   });
+
+  patchGestaltPreparedData();
 });
 
 Hooks.once("ready", () => {
+  patchGestaltPreparedData();
+  reprepareGestaltActors();
+
   if (game.user.isGM) {
     if (isEnabled("crueler-criticals")) syncCruelerCriticalsSetting(true);
     if (isEnabled("asi-feat")) syncSw5eAsiAndFeatSetting(true);
@@ -2414,6 +3401,12 @@ Hooks.once("ready", () => {
     openProgression: (actor) => new CharacterProgressionPanel(actor).render(true),
     progressionState,
     progressionScan,
+    convertGestaltClassToReference,
+    createGestaltArchetypeReference,
+    removeProgressionArchetype,
+    applyGestaltHitDieToPrimary,
+    syncGestaltClassHitDice,
+    alternativeArmorSummary,
     applyTacticalInitiative
   };
 });
@@ -2475,6 +3468,14 @@ Hooks.on("dnd5e.postUseActivity", handleUseActivity);
 Hooks.on("sw5e.postUseActivity", handleUseActivity);
 Hooks.on("dnd5e.postBuildAttackRollConfig", handleElevationPostBuildAttackRollConfig);
 Hooks.on("dnd5e.postAttackRollConfiguration", handleElevationPostAttackRollConfiguration);
+Hooks.on("dnd5e.postBuildAttackRollConfig", handleAlternativeArmorPostBuildAttackRollConfig);
+Hooks.on("dnd5e.postAttackRollConfiguration", handleAlternativeArmorPostAttackRollConfiguration);
+Hooks.on("dnd5e.postDamageRollConfiguration", markAlternativeArmorAttackDamage);
+Hooks.on("sw5e.postDamageRollConfiguration", markAlternativeArmorAttackDamage);
+Hooks.on("dnd5e.rollDamage", markAlternativeArmorAttackDamage);
+Hooks.on("sw5e.rollDamage", markAlternativeArmorAttackDamage);
+Hooks.on("dnd5e.calculateDamage", applyAlternativeArmorDamageReduction);
+Hooks.on("sw5e.calculateDamage", applyAlternativeArmorDamageReduction);
 Hooks.on("dnd5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("sw5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Force Alignment", renderForceAlignmentActorPanel, app, html));
@@ -2483,6 +3484,9 @@ Hooks.on("renderActorSheet5eCharacter", (app, html) => safeRenderActorPanel("For
 Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Progression", renderProgressionActorPanel, app, html));
 Hooks.on("renderActorSheetV2", (app, html) => safeRenderActorPanel("Progression", renderProgressionActorPanel, app, html));
 Hooks.on("renderActorSheet5eCharacter", (app, html) => safeRenderActorPanel("Progression", renderProgressionActorPanel, app, html));
+Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Alternative Armor", renderAlternativeArmorActorPanel, app, html));
+Hooks.on("renderActorSheetV2", (app, html) => safeRenderActorPanel("Alternative Armor", renderAlternativeArmorActorPanel, app, html));
+Hooks.on("renderActorSheet5eCharacter", (app, html) => safeRenderActorPanel("Alternative Armor", renderAlternativeArmorActorPanel, app, html));
 
 Hooks.on("renderCombatTracker", (_app, html) => {
   if (!game.user.isGM || !isEnabled("tactical-initiative")) return;

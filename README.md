@@ -21,6 +21,7 @@ https://github.com/DeviousFate/SW5e-Variant-Rules/releases/latest/download/modul
 ## Current Automation
 
 - **Wounds**: Tracks wounded levels, escalating save DCs, and death save failures.
+- **Alternative Armor**: Displays calculated Alternative AC/DR on the SWVR Actor Sheet, adjusts single-target attack rolls to resolve against Alternative AC, and applies passive DR to tagged attack-activity damage.
 - **Strenuous Combat**: Rolls post-combat Constitution saves for exhaustion.
 - **Tactical Initiative**: Allows selected combatants to share the lowest initiative.
 - **Hunted**: Tracks combat-only Force power disturbance pools, resolves d100 Hunted checks at combat end, and displays GM-only hunter escalation logs.
@@ -35,7 +36,11 @@ https://github.com/DeviousFate/SW5e-Variant-Rules/releases/latest/download/modul
 
 - **Gestalt and Dichotomous Characters**: Adds SWVR Actor Sheet configuration, actor scanning, hit die and XP guidance, ASI/multiclass warnings, archetype tracking, and a GM-reviewed progression notes feature.
 
-To configure a Gestalt character, enable **Gestalt and Dichotomous Characters** and **Use SWVR Actor Sheet**, add the primary and secondary class items to the actor, open the sheet's **Progression** panel, set **Progression Mode** to **Gestalt**, choose the class sources for saving throws, skills, equipment, and ASI handling, then select **Save and Scan**.
+To configure a Gestalt character, enable **Gestalt and Dichotomous Characters** and **Use SWVR Actor Sheet**, add both class items to the actor, open the sheet's **Progression** panel, set **Progression Mode** to **Gestalt**, choose the class sources for saving throws, skills, equipment, and ASI handling, then select **Save and Scan**.
+
+Both Gestalt classes should remain real class items so Foundry can keep their class features and archetype data available. SWVR corrects prepared character level, proficiency, HP max, and hit dice so the actor uses the Gestalt level instead of the summed class levels. Use **Sync Gestalt Class Hit Dice** to persist the averaged hit-die denomination on the primary class and zero the secondary class's hit-dice contribution for rest and hit-die workflows.
+
+For **Gestalt + Dichotomous**, set **Progression Mode** to **Gestalt + Dichotomous** and choose four total archetypes: two under each Gestalt class track. SW5e/D&D5e only allows one native archetype on a class, so add additional archetypes by dropping them onto the matching class track in the SWVR Progression window or by pasting the archetype UUID into that class track's import field.
 
 ## Reminder Support
 
