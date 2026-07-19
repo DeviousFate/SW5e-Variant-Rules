@@ -22,6 +22,28 @@
     <p class="notes"><strong>Current major tier:</strong> {{majorBenefit}}</p>
   {{/if}}
 
+  {{#if tier5Boon}}
+    <p class="notes"><strong>{{tier5Label}} boon:</strong> {{tier5Boon.name}} ({{tier5Boon.methodLabel}} result {{tier5Boon.roll}} by {{tier5Boon.userName}})</p>
+  {{/if}}
+
+  {{#if canManageTier5Boon}}
+    <section class="sw5e-vr-force-alignment-tier5">
+      <h3>{{tier5Label}} Boon</h3>
+      <div class="sw5e-vr-force-alignment-tier5-controls">
+        <select name="tier5BoonRoll">
+          {{#each tier5Options}}
+            <option value="{{roll}}" {{#if selected}}selected{{/if}}>{{roll}} - {{name}}</option>
+          {{/each}}
+        </select>
+        <button type="button" data-action="assign-tier5-boon" data-side="{{tier5Side}}"><i class="fas fa-check"></i> Assign</button>
+        <button type="button" data-action="roll-tier5-boon" data-side="{{tier5Side}}"><i class="fas fa-dice-d6"></i> Roll</button>
+        {{#if tier5Boon}}
+          <button type="button" data-action="clear-tier5-boon" data-side="{{tier5Side}}"><i class="fas fa-times"></i> Clear</button>
+        {{/if}}
+      </div>
+    </section>
+  {{/if}}
+
   {{#if isGM}}
     <section class="sw5e-vr-force-alignment-gm">
       {{#if disturbancePools.length}}

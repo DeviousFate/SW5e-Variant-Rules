@@ -26,6 +26,7 @@ const FORCE_ALIGNMENT_DEFAULT = {
   value: 0,
   seenPowers: { lgt: {}, drk: {} },
   resolvedMinorTiers: { benevolence: {}, corruption: {} },
+  majorBoons: { benevolence: null, corruption: null },
   minorTraits: [],
   deedLog: []
 };
@@ -134,6 +135,25 @@ const FORCE_ALIGNMENT_MAJOR_CORRUPTIONS = {
   3: "You have advantage on saves against dark powers, and healing from light powers is halved.",
   4: "Dark powers cost 1 fewer Force Point, and light powers cost 1 additional Force Point.",
   5: "Dark Entity boon. Roll or assign one boon from the Dark Entity table."
+};
+
+const FORCE_ALIGNMENT_TIER5_BOONS = {
+  benevolence: [
+    { roll: 1, name: "Lightbringer" },
+    { roll: 2, name: "Protection" },
+    { roll: 3, name: "Immutable Defense" },
+    { roll: 4, name: "Quick Casting" },
+    { roll: 5, name: "Lay On Hands" },
+    { roll: 6, name: "Healer" }
+  ],
+  corruption: [
+    { roll: 1, name: "Deathbringer" },
+    { roll: 2, name: "Invincibility" },
+    { roll: 3, name: "Irresistible Offense" },
+    { roll: 4, name: "Quick Casting" },
+    { roll: 5, name: "Recovery" },
+    { roll: 6, name: "Power Mastery" }
+  ]
 };
 
 const RULES = [
@@ -1776,6 +1796,9 @@ async function setForceAlignmentState(actor, state) {
   state.resolvedMinorTiers ??= { benevolence: {}, corruption: {} };
   state.resolvedMinorTiers.benevolence ??= {};
   state.resolvedMinorTiers.corruption ??= {};
+  state.majorBoons ??= { benevolence: null, corruption: null };
+  state.majorBoons.benevolence ??= null;
+  state.majorBoons.corruption ??= null;
   state.minorTraits = [...(state.minorTraits ?? [])].slice(-50);
   state.deedLog = [...(state.deedLog ?? [])].slice(-200);
   await actor.setFlag(MODULE_ID, "forceAlignment", state);
@@ -1820,6 +1843,31 @@ function forceAlignmentMajorBenefit(value) {
   const tier = Math.min(5, Math.floor(Math.abs(Number(value ?? 0)) / 20));
   if (tier <= 0) return "";
   return side === "benevolence" ? FORCE_ALIGNMENT_MAJOR_BENEFITS[tier] : FORCE_ALIGNMENT_MAJOR_CORRUPTIONS[tier];
+}
+
+function forceAlignmentTier5Side(value) {
+  const score = clampForceAlignment(value);
+  if (score >= 100) return "benevolence";
+  if (score <= -100) return "corruption";
+  return "neutral";
+}
+
+function forceAlignmentTier5Label(side) {
+  if (side === "benevolence") return "Luminous Being";
+  if (side === "corruption") return "Dark Entity";
+  return "";
+}
+
+function forceAlignmentTier5BoonOptions(side, selectedRoll = null) {
+  const selected = Number(selectedRoll ?? 0);
+  return [...(FORCE_ALIGNMENT_TIER5_BOONS[side] ?? [])].map((boon) => ({
+    ...boon,
+    selected: boon.roll === selected
+  }));
+}
+
+function forceAlignmentTier5Boon(side, roll) {
+  return FORCE_ALIGNMENT_TIER5_BOONS[side]?.find((boon) => boon.roll === Number(roll)) ?? null;
 }
 
 function romanNumeral(value) {
@@ -1954,7 +2002,7 @@ function confirmResetForceAlignment(actor, onReset) {
   if (!game.user.isGM || !actor) return;
   new Dialog({
     title: "Reset Force Alignment",
-    content: `<p>Reset Force Alignment for <strong>${escapeHtml(actor.name)}</strong>?</p><p>This clears the score, cast history, resolved tier prompts, minor traits, and the action/deed log.</p>`,
+    content: `<p>Reset Force Alignment for <strong>${escapeHtml(actor.name)}</strong>?</p><p>This clears the score, cast history, resolved tier prompts, Tier 5 boons, minor traits, and the action/deed log.</p>`,
     buttons: {
       reset: {
         icon: '<i class="fas fa-trash"></i>',
@@ -1972,6 +2020,95 @@ function confirmResetForceAlignment(actor, onReset) {
     },
     default: "cancel"
   }).render(true);
+}
+
+async function setForceAlignmentTier5Boon(actor, side, boon, method = "assigned") {
+  if (!game.user.isGM || !actor || !boon) return null;
+  const state = forceAlignmentState(actor);
+  const endpointSide = forceAlignmentTier5Side(state.value);
+  if (side !== endpointSide) {
+    ui.notifications.warn("Tier 5 boons can only be assigned to a Luminous Being or Dark Entity.");
+    return null;
+  }
+
+  const sideLabel = forceAlignmentTier5Label(side);
+  const assigned = {
+    id: foundry.utils.randomID(),
+    timestamp: new Date().toISOString(),
+    userId: game.user.id,
+    userName: game.user.name,
+    side,
+    sideLabel,
+    roll: Number(boon.roll),
+    name: boon.name,
+    method
+  };
+
+  state.majorBoons ??= { benevolence: null, corruption: null };
+  state.majorBoons[side] = assigned;
+  state.deedLog = [...(state.deedLog ?? []), forceAlignmentLogEntry({
+    kind: "majorBoon",
+    label: `${sideLabel} boon ${method === "rolled" ? "rolled" : "assigned"}`,
+    note: `${sideLabel}: ${boon.name} (${method === "rolled" ? `d6 result ${boon.roll}` : "GM assignment"}).`,
+    points: 0,
+    previous: state.value,
+    next: state.value
+  })];
+  await setForceAlignmentState(actor, state);
+  refreshForceAlignmentPanelsForActor(actor.id);
+  return assigned;
+}
+
+async function assignForceAlignmentTier5Boon(actor, side, roll) {
+  const boon = forceAlignmentTier5Boon(side, roll);
+  if (!boon) {
+    ui.notifications.warn("Choose a valid Tier 5 boon.");
+    return null;
+  }
+  const assigned = await setForceAlignmentTier5Boon(actor, side, boon, "assigned");
+  if (assigned) ui.notifications.info(`${forceAlignmentTier5Label(side)} boon assigned: ${boon.name}.`);
+  return assigned;
+}
+
+async function rollForceAlignmentTier5Boon(actor, side) {
+  if (!game.user.isGM || !actor) return null;
+  const endpointSide = forceAlignmentTier5Side(forceAlignmentState(actor).value);
+  if (side !== endpointSide) {
+    ui.notifications.warn("Tier 5 boons can only be rolled for a Luminous Being or Dark Entity.");
+    return null;
+  }
+  const roll = await new Roll("1d6").evaluate({ async: true });
+  const boon = forceAlignmentTier5Boon(side, roll.total);
+  if (!boon) {
+    ui.notifications.warn("Unable to resolve Tier 5 boon roll.");
+    return null;
+  }
+  const assigned = await setForceAlignmentTier5Boon(actor, side, boon, "rolled");
+  if (!assigned) return null;
+  await roll.toMessage({
+    speaker: ChatMessage.getSpeaker({ actor }),
+    flavor: `Force Alignment: ${forceAlignmentTier5Label(side)} boon - ${boon.name}`
+  });
+  return assigned;
+}
+
+async function clearForceAlignmentTier5Boon(actor, side) {
+  if (!game.user.isGM || !actor) return;
+  const state = forceAlignmentState(actor);
+  const existing = state.majorBoons?.[side];
+  if (!existing) return;
+  const sideLabel = forceAlignmentTier5Label(side);
+  state.majorBoons[side] = null;
+  state.deedLog = [...(state.deedLog ?? []), forceAlignmentLogEntry({
+    kind: "majorBoon",
+    label: `${sideLabel} boon cleared`,
+    note: `${existing.name} was removed by the GM.`,
+    points: 0,
+    previous: state.value,
+    next: state.value
+  })];
+  await setForceAlignmentState(actor, state);
+  refreshForceAlignmentPanelsForActor(actor.id);
 }
 
 async function recordForceAlignmentCast(payload) {
@@ -2696,6 +2833,8 @@ class ForceAlignmentPanel extends Application {
     const state = forceAlignmentState(this.actor);
     const value = clampForceAlignment(state.value);
     const side = forceAlignmentSide(value);
+    const tier5Side = forceAlignmentTier5Side(value);
+    const tier5Boon = tier5Side === "neutral" ? null : state.majorBoons?.[tier5Side];
     return {
       actorName: this.actor?.name ?? "Actor",
       value,
@@ -2705,6 +2844,17 @@ class ForceAlignmentPanel extends Application {
       tierLabel: forceAlignmentTierLabel(value),
       majorBenefit: forceAlignmentMajorBenefit(value),
       isGM: game.user.isGM,
+      tier5Side,
+      tier5Label: forceAlignmentTier5Label(tier5Side),
+      tier5Options: forceAlignmentTier5BoonOptions(tier5Side, tier5Boon?.roll),
+      tier5Boon: tier5Boon
+        ? {
+          ...tier5Boon,
+          when: new Date(tier5Boon.timestamp).toLocaleString(),
+          methodLabel: tier5Boon.method === "rolled" ? "Rolled" : "Assigned"
+        }
+        : null,
+      canManageTier5Boon: game.user.isGM && tier5Side !== "neutral",
       disturbancePools: disturbancePoolsForActor(this.actor),
       minorTraits: [...(state.minorTraits ?? [])].reverse().map((entry) => ({
         ...entry,
@@ -2750,6 +2900,25 @@ class ForceAlignmentPanel extends Application {
     html.find("[data-action='reset-alignment']").on("click", () => {
       if (!game.user.isGM) return;
       confirmResetForceAlignment(this.actor, () => this.render());
+    });
+    html.find("[data-action='assign-tier5-boon']").on("click", async (event) => {
+      if (!game.user.isGM) return;
+      const side = event.currentTarget.dataset.side;
+      const roll = Number(html.find("[name='tier5BoonRoll']").val() ?? 0);
+      await assignForceAlignmentTier5Boon(this.actor, side, roll);
+      this.render();
+    });
+    html.find("[data-action='roll-tier5-boon']").on("click", async (event) => {
+      if (!game.user.isGM) return;
+      const side = event.currentTarget.dataset.side;
+      await rollForceAlignmentTier5Boon(this.actor, side);
+      this.render();
+    });
+    html.find("[data-action='clear-tier5-boon']").on("click", async (event) => {
+      if (!game.user.isGM) return;
+      const side = event.currentTarget.dataset.side;
+      await clearForceAlignmentTier5Boon(this.actor, side);
+      this.render();
     });
     html.find("[data-action='hunted-log']").on("click", () => {
       if (!game.user.isGM) return;
@@ -3394,6 +3563,9 @@ Hooks.once("ready", () => {
     forceAlignmentState,
     resetForceAlignment,
     confirmResetForceAlignment,
+    assignForceAlignmentTier5Boon,
+    rollForceAlignmentTier5Boon,
+    clearForceAlignmentTier5Boon,
     openConfig: () => new VariantRulesConfig().render(true),
     openReport: () => new VariantRulesReport().render(true),
     openHuntedLog: () => new HuntedDisturbanceLog().render(true),

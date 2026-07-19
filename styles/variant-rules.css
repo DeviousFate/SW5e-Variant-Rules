@@ -319,6 +319,35 @@
   width: 28px;
 }
 
+.sw5e-vr-force-alignment-tier5 {
+  border-top: 1px solid rgba(0, 0, 0, 0.14);
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+.sw5e-vr-force-alignment-tier5 h3 {
+  margin: 0 0 0.35rem;
+}
+
+.sw5e-vr-force-alignment-tier5-controls {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.sw5e-vr-force-alignment-tier5-controls select {
+  flex: 1;
+  min-width: 0;
+}
+
+.sw5e-vr-force-alignment-tier5-controls button {
+  flex: 0 0 auto;
+  min-width: 64px;
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+  width: auto;
+}
+
 .sw5e-vr-force-alignment-gm {
   border-top: 1px solid rgba(0, 0, 0, 0.14);
   margin-top: 0.75rem;
