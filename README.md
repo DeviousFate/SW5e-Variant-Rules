@@ -24,13 +24,13 @@ https://github.com/DeviousFate/SW5e-Variant-Rules/releases/latest/download/modul
 - **Alternative Armor**: Displays calculated Alternative AC/DR on the SWVR Actor Sheet, adjusts single-target attack rolls to resolve against Alternative AC, and applies passive DR to tagged attack-activity damage.
 - **Strenuous Combat**: Rolls post-combat Constitution saves for exhaustion.
 - **Tactical Initiative**: Allows selected combatants to share the lowest initiative.
-- **Hunted**: Tracks combat-only Force power disturbance pools, resolves d100 Hunted checks at combat end, and displays GM-only hunter escalation logs.
+- **Hunted**: Tracks persistent user-based Force power disturbance pools, resolves d100 Hunted checks at combat end, reduces pools by character level on long rests, and displays GM-only pool and escalation logs.
 - **Milestone Leveling**: Syncs D&D5e leveling mode between XP and no-XP advancement.
 - **Force Alignment**: Tracks class-sourced light/dark Force power use, tier thresholds, GM adjustments, traits, and deed logs.
 - **Crueler Criticals**: Syncs D&D5e critical max dice behavior.
 - **ASI and a Feat**: Syncs the SW5e module's ASI and Feat setting.
 - **Simplified Forcecasting**: Syncs the SW5e module's Simplified Forcecasting setting.
-- **Elevation**: Applies ranged attack-roll bonuses from dominance, superdominance, and hyperdominance.
+- **Elevation**: Applies relational attack, AC, and Dexterity-save adjustments from dominance, superdominance, and hyperdominance.
 
 ## Assisted Character Building
 

@@ -12,6 +12,39 @@
           <span class="sw5e-vr-hunted-status" title="{{huntedStatusDescription}}">{{huntedStatusLabel}} {{huntedCount}}</span>
           <button type="button" data-action="reset-user" data-user-id="{{userId}}"><i class="fas fa-undo"></i> Reset User</button>
         </header>
+        <div class="sw5e-vr-hunted-manual-controls sw5e-vr-hunted-log-controls" data-hunted-user-id="{{userId}}">
+          <label>Pool adjustment</label>
+          <input type="number" value="1" step="1" data-field="hunted-pool-adjustment" title="Use a positive or negative value" />
+          <button type="button" data-action="hunted-pool-adjust" title="Apply Disturbance Point adjustment"><i class="fas fa-check"></i> Apply</button>
+          <label>Hunted tier</label>
+          <button type="button" data-action="hunted-tier-adjust" data-amount="-1" title="Decrease Hunted tier" {{#unless canDecreaseHuntedTier}}disabled{{/unless}}><i class="fas fa-arrow-down"></i></button>
+          <button type="button" data-action="hunted-tier-adjust" data-amount="1" title="Increase Hunted tier" {{#unless canIncreaseHuntedTier}}disabled{{/unless}}><i class="fas fa-arrow-up"></i></button>
+        </div>
+
+        {{#if manualAdjustments.length}}
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>GM</th>
+                <th>Adjustment</th>
+                <th>Change</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each manualAdjustments}}
+                <tr>
+                  <td>{{when}}</td>
+                  <td>{{gmName}}</td>
+                  <td>{{adjustmentLabel}}</td>
+                  <td>{{changeLabel}}</td>
+                  <td>{{resultLabel}}</td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
+        {{/if}}
 
         {{#if resolutions.length}}
           <table>
@@ -34,6 +67,31 @@
                   <td>{{rollLabel}}</td>
                   <td>{{resultLabel}}</td>
                   <td>{{huntedStatusLabel}} {{huntedCount}}</td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
+        {{/if}}
+
+        {{#if restReductions.length}}
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Actor</th>
+                <th>Level</th>
+                <th>Long Rest Reduction</th>
+                <th>Pool</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each restReductions}}
+                <tr>
+                  <td>{{when}}</td>
+                  <td>{{actorName}}</td>
+                  <td>{{level}}</td>
+                  <td>-{{reduction}}</td>
+                  <td>{{totalBefore}} to {{totalAfter}}</td>
                 </tr>
               {{/each}}
             </tbody>

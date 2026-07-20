@@ -5,6 +5,7 @@ const MODULE_ID = (() => {
 const SOURCE_URL = "https://sw5e.com/rules/variantRules";
 const SW5E_SETTING_NAMESPACES = ["sw5e-module", "sw5e"];
 const RECENT_HUNTED_CASTS = new Map();
+const RECENT_HUNTED_RESTS = new Map();
 const RECENT_ALIGNMENT_CASTS = new Map();
 const RESOLVED_HUNTED_COMBATS = new Set();
 const ALTERNATIVE_ARMOR_ATTACK_PROPERTY = "swvr-alt-armor-attack";
@@ -21,6 +22,7 @@ const HUNTED_STATUS_LADDER = [
   { count: 4, label: "Closing", description: "Hunters are close enough that their arrival is a credible threat." },
   { count: 5, label: "Hunted", description: "Hunters have identified the quarry and are prepared to act." }
 ];
+const HUNTED_MAX_TIER = HUNTED_STATUS_LADDER[HUNTED_STATUS_LADDER.length - 1].count;
 
 const FORCE_ALIGNMENT_DEFAULT = {
   value: 0,
@@ -176,14 +178,14 @@ const RULES = [
   rule("destiny", "Destiny", "character", "Manual", "Characters use destiny-based rewards and spend options.", "Destiny awards and spend timing are narrative campaign management."),
   rule("dismemberment", "Dismemberment", "combat", "Manual", "Major injuries can remove or impair limbs under severe combat outcomes.", "The rule is injury adjudication and character-state narration, not a single mechanical flag."),
   rule("dueling", "Dueling", "combat", "Manual", "Formal duels can use special pacing or restrictions.", "Who is dueling, when outside interference matters, and what constraints apply are narrative state."),
-  rule("elevation", "Elevation", "combat", "Automated", "Creatures at sufficient height and horizontal distance gain the Elevation ranged attack bonus.", "Automated for ranged attack rolls against one targeted token. Target cover statuses reduce dominance unless the attacker has a detected Sharpshooter Mastery-style feat. The advantage/disadvantage guidance remains GM-adjudicated."),
+  rule("elevation", "Elevation", "combat", "Automated", "Creatures at sufficient height and horizontal distance gain the Elevation attack, AC, and Dexterity-save adjustments.", "Automated for attacks against one targeted token and Dexterity saves whose controlling creature can be resolved from the originating activity message or one targeted token. Cover and detected Sharpshooter Mastery-style feats modify the relational bonuses as prescribed. The advantage/disadvantage guidance remains GM-adjudicated."),
   rule("exertion", "Exertion", "combat", "Manual", "Characters can push beyond normal limits at a cost such as exhaustion.", "The trigger and acceptable cost are player and GM choices."),
   rule("flanking", "Flanking", "combat", "Manual", "Positioning around a target can grant combat benefits.", "Reliable automation requires a grid geometry and reach model that matches the table's tokens, sizes, and diagonals."),
   rule("force-alignment", "Force Alignment", "casting", "Automated", "Force power use shifts a character toward light or dark alignment, with tier saves for minor traits.", "Automated for class-sourced light and dark Force powers of 1st level or higher. At-wills, universal powers, tech powers, and detectable non-class sources are ignored. GM deed adjustments and trait logs are available on the SWVR Actor Sheet panel."),
   rule("force-tech-prowess", "Force and Tech Prowess", "character", "Manual", "Characters can develop broader force or tech capability.", "This is feat/feature and power-list progression data."),
   rule("force-bond", "Force-Bond", "theme", "Manual", "Characters can share a force-linked bond with narrative and situational effects.", "The benefit is intentionally relationship- and scene-dependent."),
   rule("gestalt-dichotomous", "Gestalt and Dichotomous Characters", "character", "Assisted", "Characters can progress through multiple class structures in nonstandard ways.", "The SWVR Actor Sheet stores Gestalt/Dichotomous configuration, scans class and archetype items, calculates effective hit die and XP guidance, corrects prepared level/proficiency/HP/hit dice for Gestalt actors, flags ASI/multiclass conflicts, and can create a GM-reviewed progression note item."),
-  rule("hunted", "Hunted", "theme", "Automated", "Each player has a combat Disturbance Point pool that increases when they cast Force powers by the power's level; at-wills count as level 0.", "Automated for SW5E Force powers cast during combat encounters only. At combat end, the GM rolls d100 against each active pool; success records a Hunted status and advances hunter perception. Tech powers are ignored."),
+  rule("hunted", "Hunted", "theme", "Automated", "Each player has a persistent Disturbance Point pool that increases when they cast Force powers by the power's level; at-wills count as level 0.", "Automated for SW5E Force powers cast during combat encounters only. At combat end, the GM rolls d100 against each applicable pool; success records a Hunted status and advances hunter perception without clearing the pool. Each completed long rest reduces the pool by the resting actor's level. GMs can manually adjust the pool and Hunted tier. Tech powers are ignored."),
   rule("invocation-versatility", "Invocation Versatility", "character", "Manual", "Characters can replace invocation choices under defined circumstances.", "This is level-up and retraining bookkeeping."),
   rule("longer-rests", "Longer Rests", "resting", "Manual", "Short and long rests take longer or have stricter availability.", "The system rest button can still be clicked; enforcement depends on calendar/timekeeping modules and GM pacing."),
   rule("milestone-leveling", "Milestone Leveling", "character", "Automated", "Characters level by story milestones instead of experience totals.", "When enabled, D&D5e Leveling Mode is set to Level Advancement without XP. When disabled, it is set to Experience Points."),
@@ -344,10 +346,12 @@ function isResponsibleGM() {
 
 function resolveUserForActor(actor, fallbackUserId = game.user.id) {
   if (!actor) return game.users.get(fallbackUserId) ?? game.user;
-  const activeOwners = game.users
-    .filter((user) => user.active && !user.isGM && actor.testUserPermission?.(user, "OWNER"))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  return activeOwners[0] ?? game.users.get(fallbackUserId) ?? game.user;
+  const fallbackUser = game.users.get(fallbackUserId);
+  if (fallbackUser && !fallbackUser.isGM && actor.testUserPermission?.(fallbackUser, "OWNER")) return fallbackUser;
+  const owners = game.users
+    .filter((user) => !user.isGM && actor.testUserPermission?.(user, "OWNER"))
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
+  return owners[0] ?? fallbackUser ?? game.user;
 }
 
 function itemDescriptionText(item) {
@@ -467,12 +471,14 @@ function huntedStatusForCount(count) {
 }
 
 function huntedStatusView(entry = {}) {
-  const huntedCount = Math.max(0, Math.trunc(Number(entry.huntedCount ?? 0)));
+  const huntedCount = Math.min(HUNTED_MAX_TIER, Math.max(0, Math.trunc(Number(entry.huntedCount ?? 0))));
   const status = huntedStatusForCount(huntedCount);
   return {
     huntedCount,
     huntedStatusLabel: status.label,
-    huntedStatusDescription: status.description
+    huntedStatusDescription: status.description,
+    canDecreaseHuntedTier: huntedCount > 0,
+    canIncreaseHuntedTier: huntedCount < HUNTED_MAX_TIER
   };
 }
 
@@ -533,6 +539,11 @@ function disturbancePoolsForActor(actor) {
   }
 
   return [...pools.values()].sort((a, b) => String(a.userName).localeCompare(String(b.userName)));
+}
+
+function huntedRestLevel(actor) {
+  const level = Number(getActorSystem(actor, "details.level") ?? 0);
+  return Number.isFinite(level) ? Math.max(0, Math.trunc(level)) : 0;
 }
 
 function tokenElevation(token) {
@@ -631,16 +642,23 @@ function collectTokenStatusText(token) {
 
 function targetCoverLevel(token) {
   const normalized = collectTokenStatusText(token).map((value) => normalizeKeywordText(value).replace(/\s+/g, ""));
+  const systemBonus = Math.max(0, Number(getActorSystem(token?.actor, "attributes.ac.cover") ?? token?.actor?.coverBonus ?? 0));
   if (normalized.some((value) => value.includes("covertotal") || value.includes("totalcover"))) {
-    return { level: 3, label: "Total Cover" };
+    return { level: 4, label: "Total Cover", bonus: 0, systemBonus, total: true };
   }
   if (normalized.some((value) => value.includes("coverthreequarters") || value.includes("threequarterscover") || value.includes("threequartercover"))) {
-    return { level: 2, label: "Three-Quarters Cover" };
+    return { level: 3, label: "Three-Quarters Cover", bonus: 5, systemBonus, total: false };
   }
   if (normalized.some((value) => value.includes("coverhalf") || value.includes("halfcover"))) {
-    return { level: 1, label: "Half Cover" };
+    return { level: 2, label: "Half Cover", bonus: 3, systemBonus, total: false };
   }
-  return { level: 0, label: "" };
+  if (normalized.some((value) => value.includes("coverquarter") || value.includes("quartercover") || value.includes("onequartercover"))) {
+    return { level: 1, label: "One-Quarter Cover", bonus: 2, systemBonus, total: false };
+  }
+  if (systemBonus >= 5) return { level: 3, label: "Three-Quarters Cover", bonus: 5, systemBonus, total: false };
+  if (systemBonus >= 3) return { level: 2, label: "Half Cover", bonus: 3, systemBonus, total: false };
+  if (systemBonus >= 2) return { level: 1, label: "One-Quarter Cover", bonus: 2, systemBonus, total: false };
+  return { level: 0, label: "", bonus: 0, systemBonus, total: false };
 }
 
 function actorSharpshooterCoverBypass(actor) {
@@ -665,9 +683,51 @@ function baseElevationDominance(verticalFeet, horizontalFeet) {
   return 0;
 }
 
-function evaluateElevationAttackBonus(process, attackMode) {
+function elevationParticipant(token) {
+  return {
+    actorId: token?.actor?.id,
+    actorName: token?.actor?.name,
+    tokenId: token?.id ?? token?.document?.id,
+    tokenName: token?.name ?? token?.document?.name
+  };
+}
+
+function elevationRollPart(adjustment, label) {
+  const value = Number(adjustment ?? 0);
+  return `${value >= 0 ? "+" : ""}${value}[SWVR Elevation: ${label}]`;
+}
+
+function originatingMessageFromRollProcess(process) {
+  const element = process?.event?.target ?? process?.event?.currentTarget;
+  const messageId = element?.closest?.("[data-message-id]")?.dataset?.messageId;
+  return messageId ? game.messages?.get(messageId) : null;
+}
+
+function tokenFromMessageSpeaker(message) {
+  const speaker = message?.speaker ?? message?.data?.speaker;
+  if (!speaker) return null;
+  if (canvas?.ready && speaker.token) {
+    const token = canvas.tokens?.get(speaker.token);
+    if (token) return token;
+  }
+  const actor = speaker.actor ? game.actors?.get(speaker.actor) : null;
+  return activeTokenForActor(actor);
+}
+
+function elevationSourceTokenForSave(process) {
+  const savingActor = process?.subject;
+  const messageToken = tokenFromMessageSpeaker(originatingMessageFromRollProcess(process));
+  if (messageToken?.actor?.id && messageToken.actor.id !== savingActor?.id) {
+    return { token: messageToken, method: "originatingMessage" };
+  }
+
+  const target = singleTargetToken();
+  if (target?.actor?.id && target.actor.id !== savingActor?.id) return { token: target, method: "target" };
+  return null;
+}
+
+function evaluateElevationAttackAdjustment(process, attackMode) {
   if (!isEnabled("elevation")) return null;
-  if (!isRangedAttackProcess(process, attackMode)) return null;
 
   const activity = process?.subject;
   const actor = activity?.actor ?? activity?.item?.actor;
@@ -677,41 +737,74 @@ function evaluateElevationAttackBonus(process, attackMode) {
 
   const verticalFeet = tokenElevation(attackerToken) - tokenElevation(targetToken);
   const horizontalFeet = horizontalTokenDistance(attackerToken, targetToken);
-  const baseLevel = baseElevationDominance(verticalFeet, horizontalFeet);
-  if (!baseLevel) return null;
-
-  const cover = targetCoverLevel(targetToken);
-  const sharpshooterMatches = actorSharpshooterCoverBypass(actor);
-  const coverIgnored = cover.level > 0 && sharpshooterMatches.length > 0;
-  const effectiveLevel = Math.max(0, baseLevel - (coverIgnored ? 0 : cover.level));
-  if (!effectiveLevel) return null;
-
-  const base = ELEVATION_LEVELS[baseLevel];
-  const effective = ELEVATION_LEVELS[effectiveLevel];
-  return {
+  const rangedAttack = isRangedAttackProcess(process, attackMode);
+  const common = {
     source: "SW5e Elevation",
-    label: effective.label,
-    baseLabel: base.label,
-    level: effectiveLevel,
-    baseLevel,
-    bonus: effective.bonus,
     verticalFeet: Math.round(verticalFeet * 100) / 100,
     horizontalFeet: Math.round(horizontalFeet * 100) / 100,
-    attacker: {
-      actorId: actor.id,
-      actorName: actor.name,
-      tokenId: attackerToken.id ?? attackerToken.document?.id,
-      tokenName: attackerToken.name ?? attackerToken.document?.name
-    },
-    target: {
-      actorId: targetToken.actor?.id,
-      actorName: targetToken.actor?.name,
-      tokenId: targetToken.id ?? targetToken.document?.id,
-      tokenName: targetToken.name ?? targetToken.document?.name
-    },
+    attacker: elevationParticipant(attackerToken),
+    target: elevationParticipant(targetToken)
+  };
+
+  if (verticalFeet > 0) {
+    if (!rangedAttack) return null;
+    const baseLevel = baseElevationDominance(verticalFeet, horizontalFeet);
+    if (!baseLevel) return null;
+    const cover = targetCoverLevel(targetToken);
+    if (cover.total) return null;
+    const sharpshooterMatches = actorSharpshooterCoverBypass(actor);
+    const coverIgnored = cover.level > 0 && sharpshooterMatches.length > 0;
+    const effectiveLevel = Math.max(0, baseLevel - (coverIgnored ? 0 : cover.level));
+    const base = ELEVATION_LEVELS[baseLevel];
+    const effective = ELEVATION_LEVELS[effectiveLevel];
+    const bonus = effective?.bonus ?? 0;
+    const coverLabel = cover.label
+      ? coverIgnored
+        ? `${cover.label} ignored`
+        : `${cover.label} reduces ${base.label} to ${effective?.label ?? "no dominance"}`
+      : "";
+    return {
+      ...common,
+      effect: "rangedAttack",
+      label: effective?.label ?? "No Dominance",
+      baseLabel: base.label,
+      level: effectiveLevel,
+      baseLevel,
+      bonus,
+      formulaAdjustment: cover.systemBonus + bonus,
+      formulaLabel: `${effective?.label ?? "Dominance negated"} ranged attack${coverLabel ? `; ${coverLabel}` : ""}`,
+      cover: {
+        ...cover,
+        ignoredBySharpshooter: coverIgnored
+      },
+      sharpshooterFeats: sharpshooterMatches
+    };
+  }
+
+  const baseLevel = baseElevationDominance(-verticalFeet, horizontalFeet);
+  if (!baseLevel) return null;
+  const cover = targetCoverLevel(targetToken);
+  if (cover.total) return null;
+  const sharpshooterMatches = actorSharpshooterCoverBypass(actor);
+  const coverIgnored = rangedAttack && cover.level > 0 && sharpshooterMatches.length > 0;
+  const dominance = ELEVATION_LEVELS[baseLevel];
+  const desiredDefense = coverIgnored ? dominance.bonus : Math.max(dominance.bonus, cover.bonus);
+  const defenseLabel = cover.label && !coverIgnored && cover.bonus > dominance.bonus
+    ? cover.label
+    : dominance.label;
+  return {
+    ...common,
+    effect: "targetAC",
+    label: dominance.label,
+    baseLabel: dominance.label,
+    level: baseLevel,
+    baseLevel,
+    bonus: dominance.bonus,
+    acBonus: desiredDefense,
+    formulaAdjustment: cover.systemBonus - desiredDefense,
+    formulaLabel: `${dominance.label} target AC +${desiredDefense}${cover.label ? `; uses ${defenseLabel}` : ""}`,
     cover: {
-      level: cover.level,
-      label: cover.label,
+      ...cover,
       ignoredBySharpshooter: coverIgnored
     },
     sharpshooterFeats: sharpshooterMatches
@@ -720,16 +813,101 @@ function evaluateElevationAttackBonus(process, attackMode) {
 
 function handleElevationPostBuildAttackRollConfig(process, rollConfig, index) {
   if (index !== 0 || !isEnabled("elevation")) return;
-  const detail = evaluateElevationAttackBonus(process, rollConfig?.options?.attackMode);
-  if (!detail?.bonus) return;
-  if (!isRangedAttackProcess(process, rollConfig?.options?.attackMode)) return;
+  const detail = evaluateElevationAttackAdjustment(process, rollConfig?.options?.attackMode);
+  if (!detail) return;
 
   rollConfig.parts ??= [];
   if (rollConfig.parts.some((part) => String(part).includes("SWVR Elevation"))) return;
 
-  rollConfig.parts.push(`${detail.bonus}[SWVR Elevation: ${detail.label}]`);
+  rollConfig.parts.push(elevationRollPart(detail.formulaAdjustment, detail.formulaLabel));
   rollConfig.options ??= {};
   rollConfig.options.swvrElevation = detail;
+}
+
+function evaluateElevationDexSaveAdjustment(process) {
+  if (!isEnabled("elevation") || String(process?.ability ?? "").toLowerCase() !== "dex") return null;
+  const savingActor = process?.subject;
+  const savingToken = activeTokenForActor(savingActor);
+  const source = elevationSourceTokenForSave(process);
+  const sourceToken = source?.token;
+  const sourceActor = sourceToken?.actor;
+  if (!savingActor || !savingToken || !sourceActor || !sourceToken) return null;
+
+  const verticalFeet = tokenElevation(savingToken) - tokenElevation(sourceToken);
+  const horizontalFeet = horizontalTokenDistance(savingToken, sourceToken);
+  const cover = targetCoverLevel(savingToken);
+  if (cover.total) return null;
+  const sharpshooterMatches = actorSharpshooterCoverBypass(sourceActor);
+  const coverIgnored = cover.level > 0 && sharpshooterMatches.length > 0;
+  const common = {
+    source: "SW5e Elevation",
+    sourceResolution: source.method,
+    verticalFeet: Math.round(verticalFeet * 100) / 100,
+    horizontalFeet: Math.round(horizontalFeet * 100) / 100,
+    saver: elevationParticipant(savingToken),
+    controller: elevationParticipant(sourceToken),
+    cover: {
+      ...cover,
+      ignoredBySharpshooter: coverIgnored
+    },
+    sharpshooterFeats: sharpshooterMatches
+  };
+
+  if (verticalFeet > 0) {
+    const level = baseElevationDominance(verticalFeet, horizontalFeet);
+    if (!level) return null;
+    const dominance = ELEVATION_LEVELS[level];
+    const desiredBonus = coverIgnored ? dominance.bonus : Math.max(dominance.bonus, cover.bonus);
+    const defenseLabel = cover.label && !coverIgnored && cover.bonus > dominance.bonus
+      ? cover.label
+      : dominance.label;
+    return {
+      ...common,
+      effect: "dexSaveBonus",
+      label: dominance.label,
+      level,
+      baseLevel: level,
+      bonus: dominance.bonus,
+      saveBonus: desiredBonus,
+      formulaAdjustment: desiredBonus - cover.systemBonus,
+      formulaLabel: `${dominance.label} Dexterity save +${desiredBonus}${cover.label ? `; uses ${defenseLabel}` : ""}`
+    };
+  }
+
+  const baseLevel = baseElevationDominance(-verticalFeet, horizontalFeet);
+  if (!baseLevel) return null;
+  const base = ELEVATION_LEVELS[baseLevel];
+  const effectiveLevel = Math.max(0, baseLevel - (coverIgnored ? 0 : cover.level));
+  const effective = ELEVATION_LEVELS[effectiveLevel];
+  const penalty = effective?.bonus ?? 0;
+  const coverLabel = cover.label
+    ? coverIgnored
+      ? `${cover.label} ignored`
+      : `${cover.label} reduces ${base.label} to ${effective?.label ?? "no dominance"}`
+    : "";
+  return {
+    ...common,
+    effect: "dexSavePenalty",
+    label: effective?.label ?? "No Dominance",
+    baseLabel: base.label,
+    level: effectiveLevel,
+    baseLevel,
+    bonus: penalty,
+    savePenalty: penalty,
+    formulaAdjustment: -cover.systemBonus - penalty,
+    formulaLabel: `${effective?.label ?? "Dominance negated"} Dexterity save penalty${penalty ? ` -${penalty}` : ""}${coverLabel ? `; ${coverLabel}` : ""}`
+  };
+}
+
+function handleElevationPostBuildSavingThrowRollConfig(process, rollConfig, index) {
+  if (index !== 0 || !isEnabled("elevation")) return;
+  const detail = evaluateElevationDexSaveAdjustment(process);
+  if (!detail) return;
+  rollConfig.parts ??= [];
+  if (rollConfig.parts.some((part) => String(part).includes("SWVR Elevation"))) return;
+  rollConfig.parts.push(elevationRollPart(detail.formulaAdjustment, detail.formulaLabel));
+  rollConfig.options ??= {};
+  rollConfig.options.swvrElevationSave = detail;
 }
 
 function handleAlternativeArmorPostBuildAttackRollConfig(_process, rollConfig, index) {
@@ -761,8 +939,15 @@ function handleAlternativeArmorPostBuildAttackRollConfig(_process, rollConfig, i
 function handleElevationPostAttackRollConfiguration(rolls, process, _dialog, message) {
   if (!isEnabled("elevation")) return;
   const detail = rolls?.[0]?.options?.swvrElevation;
-  if (!detail?.bonus) return;
+  if (!detail) return;
   foundry.utils.setProperty(message, `data.flags.${MODULE_ID}.elevation`, detail);
+}
+
+function handleElevationPostSavingThrowRollConfiguration(rolls, _process, _dialog, message) {
+  if (!isEnabled("elevation")) return;
+  const detail = rolls?.[0]?.options?.swvrElevationSave;
+  if (!detail) return;
+  foundry.utils.setProperty(message, `data.flags.${MODULE_ID}.elevationSave`, detail);
 }
 
 function handleAlternativeArmorPostAttackRollConfiguration(rolls, _process, _dialog, message) {
@@ -2291,7 +2476,7 @@ async function recordDisturbanceCast(payload) {
     total: 0,
     entries: []
   };
-  const activeTotal = current.combatId === payload.combatId ? Number(current.total ?? 0) : 0;
+  const activeTotal = Math.max(0, Number(current.total ?? 0));
   const gain = Number(payload.points ?? 0);
   const entry = {
     id: foundry.utils.randomID(),
@@ -2317,7 +2502,161 @@ async function recordDisturbanceCast(payload) {
   ledger[userId] = current;
   await setDisturbanceLedger(ledger);
   refreshForceAlignmentPanelsForActor(entry.actorId);
+  refreshHuntedActorSheetPanels();
   refreshHuntedLogWindows();
+}
+
+function huntedLedgerEntry(ledger, userId) {
+  const user = game.users.get(userId);
+  return ledger[userId] ?? {
+    userId,
+    userName: user?.name ?? "Unknown User",
+    total: 0,
+    huntedCount: 0,
+    entries: []
+  };
+}
+
+async function adjustDisturbancePool(userId, amount) {
+  if (!game.user.isGM) return;
+  const requested = Math.trunc(Number(amount ?? 0));
+  if (!Number.isFinite(requested) || requested === 0) {
+    ui.notifications.warn("Enter a nonzero Disturbance Point adjustment.");
+    return;
+  }
+
+  const ledger = disturbanceLedger();
+  const current = huntedLedgerEntry(ledger, userId);
+  const previous = Math.max(0, Number(current.total ?? 0));
+  const next = Math.max(0, previous + requested);
+  const applied = next - previous;
+  if (!applied) {
+    ui.notifications.info("The Disturbance Point pool is already at 0.");
+    return;
+  }
+
+  current.total = next;
+  current.manualAdjustments = [...(current.manualAdjustments ?? []), {
+    id: foundry.utils.randomID(),
+    timestamp: new Date().toISOString(),
+    kind: "pool",
+    gmName: game.user.name,
+    change: applied,
+    previous,
+    next
+  }].slice(-100);
+  ledger[userId] = current;
+  await setDisturbanceLedger(ledger);
+  refreshForceAlignmentPanelsForActor();
+  refreshHuntedActorSheetPanels();
+  refreshHuntedLogWindows();
+}
+
+async function adjustHuntedTier(userId, amount) {
+  if (!game.user.isGM) return;
+  const direction = Math.sign(Number(amount ?? 0));
+  if (!direction) return;
+
+  const ledger = disturbanceLedger();
+  const current = huntedLedgerEntry(ledger, userId);
+  const previous = Math.min(HUNTED_MAX_TIER, Math.max(0, Math.trunc(Number(current.huntedCount ?? 0))));
+  const next = Math.min(HUNTED_MAX_TIER, Math.max(0, previous + direction));
+  if (next === previous) {
+    ui.notifications.info(`The Hunted tier is already at ${direction > 0 ? "its maximum" : "0"}.`);
+    return;
+  }
+
+  const previousStatus = huntedStatusForCount(previous);
+  const nextStatus = huntedStatusForCount(next);
+  current.huntedCount = next;
+  current.huntedStatusLabel = nextStatus.label;
+  current.huntedStatusDescription = nextStatus.description;
+  current.manualAdjustments = [...(current.manualAdjustments ?? []), {
+    id: foundry.utils.randomID(),
+    timestamp: new Date().toISOString(),
+    kind: "tier",
+    gmName: game.user.name,
+    change: next - previous,
+    previous,
+    next,
+    previousStatusLabel: previousStatus.label,
+    nextStatusLabel: nextStatus.label
+  }].slice(-100);
+  ledger[userId] = current;
+  await setDisturbanceLedger(ledger);
+  refreshForceAlignmentPanelsForActor();
+  refreshHuntedActorSheetPanels();
+  refreshHuntedLogWindows();
+}
+
+function activateHuntedManualControls(html) {
+  html.on("click", "[data-action='hunted-pool-adjust']", async (event) => {
+    const controls = $(event.currentTarget).closest("[data-hunted-user-id]");
+    const amount = controls.find("[data-field='hunted-pool-adjustment']").first().val();
+    await adjustDisturbancePool(controls.data("huntedUserId"), amount);
+  });
+  html.on("click", "[data-action='hunted-tier-adjust']", async (event) => {
+    const controls = $(event.currentTarget).closest("[data-hunted-user-id]");
+    await adjustHuntedTier(controls.data("huntedUserId"), event.currentTarget.dataset.amount);
+  });
+  html.on("keydown", "[data-field='hunted-pool-adjustment']", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    $(event.currentTarget).closest("[data-hunted-user-id]").find("[data-action='hunted-pool-adjust']").trigger("click");
+  });
+}
+
+async function reduceDisturbanceForLongRest(actor, requestedUserId = game.user.id) {
+  if (!game.user.isGM || !isEnabled("hunted") || !actor) return;
+  const user = resolveUserForActor(actor, requestedUserId);
+  if (!user || user.isGM || !actor.testUserPermission?.(user, "OWNER")) return;
+
+  const level = huntedRestLevel(actor);
+  if (level <= 0) return;
+
+  const dedupeKey = `${user.id}:${actor.uuid ?? actor.id}`;
+  const now = Date.now();
+  const recent = RECENT_HUNTED_RESTS.get(dedupeKey);
+  if (recent && now - recent < 1500) return;
+  RECENT_HUNTED_RESTS.set(dedupeKey, now);
+  for (const [key, timestamp] of RECENT_HUNTED_RESTS.entries()) {
+    if (now - timestamp > 5000) RECENT_HUNTED_RESTS.delete(key);
+  }
+
+  const ledger = disturbanceLedger();
+  const current = ledger[user.id];
+  const previous = Math.max(0, Number(current?.total ?? 0));
+  if (!current || previous <= 0) return;
+
+  const reduction = Math.min(previous, level);
+  current.total = previous - reduction;
+  current.restReductions = [...(current.restReductions ?? []), {
+    id: foundry.utils.randomID(),
+    timestamp: new Date().toISOString(),
+    actorId: actor.id,
+    actorName: actor.name ?? "Unknown Actor",
+    level,
+    reduction,
+    totalBefore: previous,
+    totalAfter: current.total
+  }].slice(-100);
+  ledger[user.id] = current;
+
+  await setDisturbanceLedger(ledger);
+  refreshForceAlignmentPanelsForActor();
+  refreshHuntedActorSheetPanels();
+  refreshHuntedLogWindows();
+}
+
+async function handleHuntedLongRest(actor, result) {
+  if (!isEnabled("hunted") || !(result?.longRest || result?.type === "long")) return;
+  const user = resolveUserForActor(actor, game.user.id);
+  if (!user || user.isGM) return;
+  if (game.user.isGM) await reduceDisturbanceForLongRest(actor, user.id);
+  else game.socket.emit(`module.${MODULE_ID}`, {
+    type: "huntedLongRest",
+    payload: { actorUuid: actor.uuid, userId: user.id }
+  });
 }
 
 function refreshForceAlignmentPanelsForActor(actorId) {
@@ -2346,6 +2685,8 @@ async function handleHuntedCombatEnd(combat) {
 
   for (const [userId, current] of Object.entries(ledger)) {
     const user = game.users.get(userId);
+    const alreadyResolved = (current.resolutions ?? []).some((entry) => combatIds.has(String(entry.combatId ?? "")));
+    if (alreadyResolved) continue;
     const storedCombatId = current.combatId ? String(current.combatId) : "";
     const exactCombatMatch = storedCombatId && combatIds.has(storedCombatId);
     const ownerFallbackMatch = !exactCombatMatch
@@ -2356,8 +2697,8 @@ async function handleHuntedCombatEnd(combat) {
     const pool = Math.max(0, Math.trunc(Number(current.total ?? 0)));
     const roll = pool > 0 ? await new Roll("1d100").evaluate({ async: true }) : null;
     const detected = Boolean(roll && rollTotal(roll) <= pool);
-    const previousCount = Math.max(0, Math.trunc(Number(current.huntedCount ?? 0)));
-    const huntedCount = detected ? previousCount + 1 : previousCount;
+    const previousCount = Math.min(HUNTED_MAX_TIER, Math.max(0, Math.trunc(Number(current.huntedCount ?? 0))));
+    const huntedCount = detected ? Math.min(HUNTED_MAX_TIER, previousCount + 1) : previousCount;
     const status = huntedStatusForCount(huntedCount);
     const resolution = {
       id: foundry.utils.randomID(),
@@ -2377,9 +2718,6 @@ async function handleHuntedCombatEnd(combat) {
     current.huntedStatusLabel = status.label;
     current.huntedStatusDescription = status.description;
     current.resolutions = [...(current.resolutions ?? []), resolution].slice(-50);
-    current.total = 0;
-    delete current.combatId;
-    delete current.combatName;
     ledger[userId] = current;
     changed = true;
 
@@ -2399,6 +2737,7 @@ async function handleHuntedCombatEnd(combat) {
   await setDisturbanceLedger(ledger);
   if (resolutionKey) RESOLVED_HUNTED_COMBATS.add(resolutionKey);
   for (const actorId of updatedActors) refreshForceAlignmentPanelsForActor(actorId);
+  refreshHuntedActorSheetPanels();
   refreshHuntedLogWindows();
 }
 
@@ -2679,6 +3018,19 @@ class HuntedDisturbanceLog extends Application {
       users: users.map((user) => ({
         ...user,
         ...huntedStatusView(user),
+        manualAdjustments: [...(user.manualAdjustments ?? [])].reverse().map((entry) => ({
+          ...entry,
+          when: new Date(entry.timestamp).toLocaleString(),
+          adjustmentLabel: entry.kind === "tier" ? "Hunted tier" : "Disturbance pool",
+          changeLabel: Number(entry.change ?? 0) > 0 ? `+${entry.change}` : String(entry.change ?? 0),
+          resultLabel: entry.kind === "tier"
+            ? `${entry.previousStatusLabel} ${entry.previous} to ${entry.nextStatusLabel} ${entry.next}`
+            : `${entry.previous} to ${entry.next}`
+        })),
+        restReductions: [...(user.restReductions ?? [])].reverse().map((entry) => ({
+          ...entry,
+          when: new Date(entry.timestamp).toLocaleString()
+        })),
         resolutions: [...(user.resolutions ?? [])].reverse().map((entry) => ({
           ...entry,
           when: new Date(entry.timestamp).toLocaleString(),
@@ -2699,12 +3051,15 @@ class HuntedDisturbanceLog extends Application {
   activateListeners(html) {
     super.activateListeners(html);
     installResizableHuntedTables(html);
+    activateHuntedManualControls(html);
     html.find("[data-action='reset-user']").on("click", async (event) => {
       const userId = event.currentTarget.dataset.userId;
       const ledger = disturbanceLedger();
       if (!ledger[userId]) return;
       ledger[userId].total = 0;
       ledger[userId].entries = [];
+      ledger[userId].manualAdjustments = [];
+      ledger[userId].restReductions = [];
       ledger[userId].resolutions = [];
       ledger[userId].huntedCount = 0;
       delete ledger[userId].combatId;
@@ -2712,10 +3067,14 @@ class HuntedDisturbanceLog extends Application {
       delete ledger[userId].huntedStatusLabel;
       delete ledger[userId].huntedStatusDescription;
       await setDisturbanceLedger(ledger);
+      refreshForceAlignmentPanelsForActor();
+      refreshHuntedActorSheetPanels();
       this.render();
     });
     html.find("[data-action='reset-all']").on("click", async () => {
       await setDisturbanceLedger({});
+      refreshForceAlignmentPanelsForActor();
+      refreshHuntedActorSheetPanels();
       this.render();
     });
     html.find("[data-action='source-detail']").on("click", (event) => {
@@ -2872,6 +3231,7 @@ class ForceAlignmentPanel extends Application {
 
   activateListeners(html) {
     super.activateListeners(html);
+    activateHuntedManualControls(html);
     html.find("[data-action='adjust']").on("click", async (event) => {
       if (!game.user.isGM) return;
       const amount = Number(event.currentTarget.dataset.amount ?? 0);
@@ -3298,6 +3658,64 @@ function insertForceAlignmentSheetPanel(html, panel) {
   return false;
 }
 
+function huntedActorSheetRows(actor) {
+  return disturbancePoolsForActor(actor).map((pool) => `
+    <div class="sw5e-vr-hunted-pool" data-hunted-user-id="${escapeHtml(pool.userId)}">
+      <div class="sw5e-vr-hunted-pool-summary">
+        <span>${escapeHtml(pool.userName)}</span>
+        <strong>${Math.max(0, Number(pool.total ?? 0))} DP</strong>
+        <em title="${escapeHtml(pool.huntedStatusDescription)}">${escapeHtml(pool.huntedStatusLabel)} ${pool.huntedCount}</em>
+      </div>
+      <div class="sw5e-vr-hunted-manual-controls">
+        <input type="number" value="1" step="1" data-field="hunted-pool-adjustment" title="Signed Disturbance Point adjustment" />
+        <button type="button" data-action="hunted-pool-adjust" title="Apply Disturbance Point adjustment"><i class="fas fa-check"></i></button>
+        <button type="button" data-action="hunted-tier-adjust" data-amount="-1" title="Decrease Hunted tier" ${pool.canDecreaseHuntedTier ? "" : "disabled"}><i class="fas fa-arrow-down"></i></button>
+        <button type="button" data-action="hunted-tier-adjust" data-amount="1" title="Increase Hunted tier" ${pool.canIncreaseHuntedTier ? "" : "disabled"}><i class="fas fa-arrow-up"></i></button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function refreshHuntedActorSheetPanels(actorId = null) {
+  if (!game.user?.isGM) return;
+  for (const panelElement of document.querySelectorAll(".sw5e-vr-hunted-sheet")) {
+    const panelActorId = panelElement.dataset.actorId;
+    if (actorId && panelActorId !== actorId) continue;
+    const actor = game.actors?.get(panelActorId);
+    const body = panelElement.querySelector(".sw5e-vr-hunted-pools");
+    if (actor && body) body.innerHTML = huntedActorSheetRows(actor);
+  }
+}
+
+function renderHuntedActorPanel(app, html) {
+  html = globalThis.jQuery && html instanceof jQuery ? html : $(html);
+  const actor = actorFromSheetApp(app);
+  if (!actor || !game.user.isGM || !useModifiedActorSheet() || !isEnabled("hunted") || isEnabled("force-alignment")) return;
+  const host = app?.element
+    ? (globalThis.jQuery && app.element instanceof jQuery ? app.element : $(app.element))
+    : html.closest(".app");
+  host?.find?.(".sw5e-vr-hunted-sheet").remove();
+  html.find(".sw5e-vr-hunted-sheet").remove();
+
+  const rows = huntedActorSheetRows(actor);
+  if (!rows) return;
+  const panel = $(`
+    <section class="sw5e-vr-hunted-sheet" data-actor-id="${escapeHtml(actor.id)}">
+      <div class="sw5e-vr-hunted-head">
+        <label>Hunted</label>
+        <button type="button" data-action="hunted-log" title="Open Hunted disturbance log"><i class="fas fa-list"></i></button>
+      </div>
+      <div class="sw5e-vr-hunted-pools">${rows}</div>
+    </section>
+  `);
+  panel.find("[data-action='hunted-log']").on("click", () => new HuntedDisturbanceLog().render(true));
+  activateHuntedManualControls(panel);
+
+  if (!insertForceAlignmentSheetPanel(html, panel)) {
+    console.warn(`SWVR could not find an actor sheet insertion point for Hunted on ${actor.name}.`);
+  }
+}
+
 function renderForceAlignmentActorPanel(app, html) {
   html = globalThis.jQuery && html instanceof jQuery ? html : $(html);
   const actor = actorFromSheetApp(app);
@@ -3540,6 +3958,12 @@ Hooks.once("ready", () => {
       recordDisturbanceCast(message.payload);
       return;
     }
+    if (message?.type === "huntedLongRest" && isResponsibleGM()) {
+      fromUuid(message.payload?.actorUuid).then((actor) => {
+        if (actor) reduceDisturbanceForLongRest(actor, message.payload?.userId);
+      });
+      return;
+    }
     if (message?.type === "forceAlignmentCast" && isResponsibleGM()) {
       recordForceAlignmentCast(message.payload);
       return;
@@ -3560,6 +3984,8 @@ Hooks.once("ready", () => {
     isEnabled,
     useModifiedActorSheet,
     disturbanceLedger,
+    adjustDisturbancePool,
+    adjustHuntedTier,
     forceAlignmentState,
     resetForceAlignment,
     confirmResetForceAlignment,
@@ -3640,6 +4066,8 @@ Hooks.on("dnd5e.postUseActivity", handleUseActivity);
 Hooks.on("sw5e.postUseActivity", handleUseActivity);
 Hooks.on("dnd5e.postBuildAttackRollConfig", handleElevationPostBuildAttackRollConfig);
 Hooks.on("dnd5e.postAttackRollConfiguration", handleElevationPostAttackRollConfiguration);
+Hooks.on("dnd5e.postBuildSavingThrowRollConfig", handleElevationPostBuildSavingThrowRollConfig);
+Hooks.on("dnd5e.postSavingThrowRollConfiguration", handleElevationPostSavingThrowRollConfiguration);
 Hooks.on("dnd5e.postBuildAttackRollConfig", handleAlternativeArmorPostBuildAttackRollConfig);
 Hooks.on("dnd5e.postAttackRollConfiguration", handleAlternativeArmorPostAttackRollConfiguration);
 Hooks.on("dnd5e.postDamageRollConfiguration", markAlternativeArmorAttackDamage);
@@ -3653,12 +4081,16 @@ Hooks.on("sw5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Force Alignment", renderForceAlignmentActorPanel, app, html));
 Hooks.on("renderActorSheetV2", (app, html) => safeRenderActorPanel("Force Alignment", renderForceAlignmentActorPanel, app, html));
 Hooks.on("renderActorSheet5eCharacter", (app, html) => safeRenderActorPanel("Force Alignment", renderForceAlignmentActorPanel, app, html));
+Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Hunted", renderHuntedActorPanel, app, html));
+Hooks.on("renderActorSheetV2", (app, html) => safeRenderActorPanel("Hunted", renderHuntedActorPanel, app, html));
+Hooks.on("renderActorSheet5eCharacter", (app, html) => safeRenderActorPanel("Hunted", renderHuntedActorPanel, app, html));
 Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Progression", renderProgressionActorPanel, app, html));
 Hooks.on("renderActorSheetV2", (app, html) => safeRenderActorPanel("Progression", renderProgressionActorPanel, app, html));
 Hooks.on("renderActorSheet5eCharacter", (app, html) => safeRenderActorPanel("Progression", renderProgressionActorPanel, app, html));
 Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Alternative Armor", renderAlternativeArmorActorPanel, app, html));
 Hooks.on("renderActorSheetV2", (app, html) => safeRenderActorPanel("Alternative Armor", renderAlternativeArmorActorPanel, app, html));
 Hooks.on("renderActorSheet5eCharacter", (app, html) => safeRenderActorPanel("Alternative Armor", renderAlternativeArmorActorPanel, app, html));
+Hooks.on("dnd5e.restCompleted", handleHuntedLongRest);
 
 Hooks.on("renderCombatTracker", (_app, html) => {
   if (!game.user.isGM || !isEnabled("tactical-initiative")) return;

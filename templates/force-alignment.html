@@ -50,11 +50,17 @@
         <div class="sw5e-vr-force-alignment-disturbance">
           <strong>Disturbance Pool</strong>
           {{#each disturbancePools}}
-            <span class="sw5e-vr-force-alignment-disturbance-pool">
-              {{userName}}: {{total}}
-              <em title="{{huntedStatusDescription}}">{{huntedStatusLabel}}</em>
-              <button type="button" data-action="hunted-log" title="Open Hunted log"><i class="fas fa-list"></i></button>
-            </span>
+            <div class="sw5e-vr-force-alignment-disturbance-pool" data-hunted-user-id="{{userId}}">
+              <span>{{userName}}: {{total}}</span>
+              <em title="{{huntedStatusDescription}}">{{huntedStatusLabel}} {{huntedCount}}</em>
+              <div class="sw5e-vr-hunted-manual-controls">
+                <input type="number" value="1" step="1" data-field="hunted-pool-adjustment" title="Signed Disturbance Point adjustment" />
+                <button type="button" data-action="hunted-pool-adjust" title="Apply Disturbance Point adjustment"><i class="fas fa-check"></i></button>
+                <button type="button" data-action="hunted-tier-adjust" data-amount="-1" title="Decrease Hunted tier" {{#unless canDecreaseHuntedTier}}disabled{{/unless}}><i class="fas fa-arrow-down"></i></button>
+                <button type="button" data-action="hunted-tier-adjust" data-amount="1" title="Increase Hunted tier" {{#unless canIncreaseHuntedTier}}disabled{{/unless}}><i class="fas fa-arrow-up"></i></button>
+                <button type="button" data-action="hunted-log" title="Open Hunted log"><i class="fas fa-list"></i></button>
+              </div>
+            </div>
           {{/each}}
         </div>
       {{/if}}
