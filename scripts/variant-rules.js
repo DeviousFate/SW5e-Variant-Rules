@@ -4,6 +4,7 @@ const MODULE_ID = (() => {
 })();
 const SOURCE_URL = "https://sw5e.com/rules/variantRules";
 const SW5E_SETTING_NAMESPACES = ["sw5e-module", "sw5e"];
+const MIDI_QOL_ID = "midi-qol";
 const RECENT_HUNTED_CASTS = new Map();
 const RECENT_HUNTED_RESTS = new Map();
 const RECENT_ALIGNMENT_CASTS = new Map();
@@ -23,7 +24,6 @@ const HUNTED_STATUS_LADDER = [
   { count: 5, label: "Hunted", description: "Hunters have identified the quarry and are prepared to act." }
 ];
 const HUNTED_MAX_TIER = HUNTED_STATUS_LADDER[HUNTED_STATUS_LADDER.length - 1].count;
-
 const FORCE_ALIGNMENT_DEFAULT = {
   value: 0,
   seenPowers: { lgt: {}, drk: {} },
@@ -219,6 +219,288 @@ function useModifiedActorSheet() {
 
 function setEnabledRules(values) {
   return game.settings.set(MODULE_ID, "enabledRules", values);
+}
+
+function midiQolActive() {
+  return Boolean(game.modules?.get(MIDI_QOL_ID)?.active);
+}
+
+function midiQolVersion() {
+  return game.modules?.get(MIDI_QOL_ID)?.version ?? "";
+}
+
+function midiWorkflowEnabled() {
+  if (!midiQolActive()) return false;
+  const settingKey = `${MIDI_QOL_ID}.EnableWorkflow`;
+  return !game.settings.settings.has(settingKey) || Boolean(game.settings.get(MIDI_QOL_ID, "EnableWorkflow"));
+}
+
+function midiConfigSettings(clone = true) {
+  if (!midiQolActive() || !game.settings.settings.has(`${MIDI_QOL_ID}.ConfigSettings`)) return null;
+  const config = game.settings.get(MIDI_QOL_ID, "ConfigSettings") ?? {};
+  return clone ? foundry.utils.deepClone(config) : config;
+}
+
+function midiOptionalRulesActive(config) {
+  let enabled = Boolean(config?.optionalRulesEnabled);
+  if (game.user?.isGM && config?.toggleOptionalRules) enabled = !enabled;
+  return enabled;
+}
+
+function midiChallengeModeArmorActive() {
+  const config = midiConfigSettings(false);
+  return Boolean(
+    config
+    && midiWorkflowEnabled()
+    && midiOptionalRulesActive(config)
+    && ![undefined, false, "none"].includes(config.optionalRules?.challengeModeArmor)
+  );
+}
+
+function alternativeArmorAutomationAvailable() {
+  return isEnabled("alternative-armor") && !midiChallengeModeArmorActive();
+}
+
+function midiCompatibilityState() {
+  if (!midiQolActive()) {
+    return {
+      active: false,
+      version: "",
+      entries: [],
+      hasEntries: false,
+      hasActionable: false,
+      hasBackup: false,
+      summary: "Midi-QOL is not active. SWVR is using native D&D5e/SW5e hooks."
+    };
+  }
+
+  const config = midiConfigSettings() ?? {};
+  const workflowActive = midiWorkflowEnabled();
+  const optionalRulesActive = workflowActive && midiOptionalRulesActive(config);
+  const entries = [];
+  const add = (id, label, status, detail, current, recommended, actionable = false) => {
+    entries.push({
+      id,
+      label,
+      status,
+      statusClass: status.toLowerCase(),
+      detail,
+      current,
+      recommended,
+      actionable
+    });
+  };
+
+  if (isEnabled("alternative-armor") && optionalRulesActive && ![undefined, false, "none"].includes(config.optionalRules?.challengeModeArmor)) {
+    add(
+      "challenge-mode-armor",
+      "Alternative Armor / Challenge Mode Armor",
+      "Conflict",
+      "Both modules would alter armor-based hit and damage resolution.",
+      String(config.optionalRules.challengeModeArmor),
+      "Challenge Mode Armor: none",
+      true
+    );
+  }
+
+  if (isEnabled("elevation")) {
+    const coverMode = String(config.optionalRules?.coverCalculation ?? "none");
+    add(
+      "elevation-cover",
+      "Elevation / Midi Cover",
+      "Adapted",
+      !workflowActive
+        ? "Midi's workflow engine is disabled; SWVR is using its native status-based path."
+        : coverMode === "none"
+          ? "SWVR is using status-based cover."
+          : "SWVR will query Midi's cover API and compensate for Midi's later attack and Dexterity-save cover adjustments.",
+      coverMode,
+      "No change required"
+    );
+  }
+
+  if (isEnabled("crueler-criticals")) {
+    const playerMode = String(config.criticalDamage ?? "default");
+    const gmMode = String(config.criticalDamageGM ?? playerMode);
+    if (playerMode !== "default" || gmMode !== "default") {
+      add(
+        "critical-damage",
+        "Crueler Criticals / Midi Critical Damage",
+        "Conflict",
+        "Midi's custom critical modes override the D&D5e setting controlled by SWVR.",
+        `Player: ${playerMode}; GM: ${gmMode}`,
+        "Player and GM: default",
+        true
+      );
+    }
+  }
+
+  if (isEnabled("defense-rolls") && optionalRulesActive && Boolean(config.optionalRules?.activeDefence)) {
+    add(
+      "active-defence",
+      "Defense Rolls / Active Defence",
+      "Handled",
+      "SWVR has no competing automation; Midi-QOL is the mechanical provider for this enabled rule.",
+      "Active Defence enabled",
+      "No change required"
+    );
+  }
+
+  if (isEnabled("critical-saving-throws") && optionalRulesActive && Boolean(config.optionalRules?.criticalSaves)) {
+    add(
+      "critical-saves",
+      "Critical Saving Throws / Midi Critical Saves",
+      "Conflict",
+      "Midi automates natural 1/20 outcomes, while SWVR leaves the rule's contextual consequences to the GM.",
+      "Critical Saves enabled",
+      "Critical Saves disabled",
+      true
+    );
+  }
+
+  if (isEnabled("wounds") && Number(config.addWounded ?? 0) > 0 && String(config.addWoundedStyle ?? "none") !== "none") {
+    add(
+      "wounded-status",
+      "Wounds / Midi Wounded Status",
+      "Conflict",
+      "Midi's percentage-based Wounded status represents a different state from SWVR Wounded Levels.",
+      `${config.addWounded}% (${config.addWoundedStyle})`,
+      "Percentage-based Wounded status disabled",
+      true
+    );
+  }
+
+  const backup = game.settings.settings.has(`${MODULE_ID}.midiCompatibilityBackup`)
+    ? game.settings.get(MODULE_ID, "midiCompatibilityBackup")
+    : {};
+  const conflicts = entries.filter((entry) => entry.status === "Conflict").length;
+  return {
+    active: true,
+    version: midiQolVersion(),
+    entries,
+    hasEntries: entries.length > 0,
+    hasActionable: entries.some((entry) => entry.actionable),
+    hasBackup: Boolean(backup?.values && Object.keys(backup.values).length),
+    summary: conflicts
+      ? `${conflicts} active compatibility conflict${conflicts === 1 ? "" : "s"} detected.`
+      : "No active Midi-QOL conflicts detected."
+  };
+}
+
+function confirmCompatibilityChange(title, content, confirmLabel) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const finish = (value) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
+    new Dialog({
+      title,
+      content,
+      buttons: {
+        confirm: {
+          icon: '<i class="fas fa-check"></i>',
+          label: confirmLabel,
+          callback: () => finish(true)
+        },
+        cancel: {
+          icon: '<i class="fas fa-times"></i>',
+          label: "Cancel",
+          callback: () => finish(false)
+        }
+      },
+      default: "cancel",
+      close: () => finish(false)
+    }).render(true);
+  });
+}
+
+function midiCompatibilityRecommendedChanges(config) {
+  const changes = [];
+  const set = (path, value, label) => {
+    const current = foundry.utils.getProperty(config, path);
+    if (current === value) return;
+    changes.push({ path, current, value, label });
+  };
+
+  if (isEnabled("alternative-armor") && midiWorkflowEnabled()) {
+    set("optionalRules.challengeModeArmor", "none", "Disable Midi Challenge Mode Armor");
+  }
+  if (isEnabled("crueler-criticals")) {
+    set("criticalDamage", "default", "Use D&D5e critical damage for players");
+    set("criticalDamageGM", "default", "Use D&D5e critical damage for the GM");
+  }
+  if (isEnabled("critical-saving-throws") && midiWorkflowEnabled()) {
+    set("optionalRules.criticalSaves", false, "Disable Midi Critical Saves");
+  }
+  if (isEnabled("wounds")) {
+    set("addWounded", 0, "Disable Midi percentage-based Wounded threshold");
+    set("addWoundedStyle", "none", "Disable Midi percentage-based Wounded style");
+  }
+  return changes;
+}
+
+async function applyRecommendedMidiCompatibilitySettings() {
+  if (!game.user.isGM || !midiQolActive()) return;
+  const config = midiConfigSettings();
+  if (!config) return;
+  const changes = midiCompatibilityRecommendedChanges(config);
+  if (!changes.length) {
+    ui.notifications.info("Midi-QOL compatibility settings already match SWVR recommendations.");
+    return;
+  }
+
+  const confirmed = await confirmCompatibilityChange(
+    "Apply Midi-QOL Compatibility Settings",
+    `<p>SWVR will make the following Midi-QOL configuration changes:</p><ul>${changes.map((change) => `<li>${change.label}</li>`).join("")}</ul><p>The previous values will be retained for restoration.</p>`,
+    "Apply Settings"
+  );
+  if (!confirmed) return;
+
+  const existingBackup = game.settings.get(MODULE_ID, "midiCompatibilityBackup") ?? {};
+  const backupValues = foundry.utils.deepClone(existingBackup.values ?? {});
+  for (const change of changes) {
+    if (!Object.prototype.hasOwnProperty.call(backupValues, change.path)) backupValues[change.path] = change.current;
+    foundry.utils.setProperty(config, change.path, change.value);
+  }
+  await game.settings.set(MODULE_ID, "midiCompatibilityBackup", {
+    version: midiQolVersion(),
+    savedAt: new Date().toISOString(),
+    values: backupValues
+  });
+  await game.settings.set(MIDI_QOL_ID, "ConfigSettings", config);
+  ui.notifications.info("Recommended Midi-QOL compatibility settings applied.");
+}
+
+async function restoreMidiCompatibilitySettings() {
+  if (!game.user.isGM || !midiQolActive()) return;
+  const backup = game.settings.get(MODULE_ID, "midiCompatibilityBackup") ?? {};
+  if (!backup.values || !Object.keys(backup.values).length) {
+    ui.notifications.warn("No SWVR Midi-QOL settings backup is available.");
+    return;
+  }
+  const confirmed = await confirmCompatibilityChange(
+    "Restore Midi-QOL Settings",
+    "<p>Restore the Midi-QOL values saved before SWVR applied its compatibility recommendations?</p>",
+    "Restore Settings"
+  );
+  if (!confirmed) return;
+
+  const config = midiConfigSettings();
+  if (!config) return;
+  for (const [path, value] of Object.entries(backup.values)) foundry.utils.setProperty(config, path, value);
+  await game.settings.set(MIDI_QOL_ID, "ConfigSettings", config);
+  await game.settings.set(MODULE_ID, "midiCompatibilityBackup", {});
+  ui.notifications.info("Previous Midi-QOL settings restored.");
+}
+
+function notifyMidiCompatibilityConflicts() {
+  if (!game.user.isGM) return;
+  const state = midiCompatibilityState();
+  const count = state.entries.filter((entry) => entry.status === "Conflict").length;
+  if (!count) return;
+  ui.notifications.warn(`SWVR detected ${count} active Midi-QOL compatibility conflict${count === 1 ? "" : "s"}. Open Configure Rules to review them.`);
 }
 
 async function syncMilestoneLevelingSetting(isEnabledNow) {
@@ -640,29 +922,93 @@ function collectTokenStatusText(token) {
   return [...values];
 }
 
-function targetCoverLevel(token) {
+function midiWorkflowFromRollProcess(process, rollConfig) {
+  if (!midiWorkflowEnabled()) return null;
+  const workflow = process?.midiOptions?.workflow
+    ?? process?.options?.midiOptions?.workflow
+    ?? process?.config?.midiOptions?.workflow
+    ?? rollConfig?.midiOptions?.workflow
+    ?? rollConfig?.options?.midiOptions?.workflow;
+  if (workflow) return workflow;
+  const workflowId = process?.midiOptions?.workflowId
+    ?? process?.options?.midiOptions?.workflowId
+    ?? process?.config?.midiOptions?.workflowId
+    ?? rollConfig?.midiOptions?.workflowId
+    ?? rollConfig?.options?.midiOptions?.workflowId
+    ?? rollConfig?.options?.workflowId;
+  if (!workflowId) return null;
+  return globalThis.MidiQOL?.Workflow?.getWorkflow?.(workflowId) ?? null;
+}
+
+function tokenFromMidiWorkflow(workflow) {
+  if (!workflow) return null;
+  if (workflow.token?.actor) return workflow.token;
+  const tokenDocument = workflow.tokenUuid ? fromUuidSync(workflow.tokenUuid) : null;
+  if (tokenDocument?.object?.actor) return tokenDocument.object;
+  if (tokenDocument?.actor) return tokenDocument;
+  return activeTokenForActor(workflow.actor ?? workflow.activity?.actor ?? workflow.item?.actor);
+}
+
+function midiDynamicCoverBonus(attackerToken, targetToken, activity) {
+  if (!midiWorkflowEnabled() || !attackerToken || !targetToken) return 0;
+  try {
+    return normalizeCoverBonus(globalThis.MidiQOL?.computeCoverBonus?.(attackerToken, targetToken, activity));
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Midi-QOL cover calculation failed; using status cover only.`, error);
+    return 0;
+  }
+}
+
+function normalizeCoverBonus(value) {
+  const numeric = Number(value ?? 0);
+  if (numeric === Infinity || numeric >= 999) return Infinity;
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+}
+
+function targetCoverLevel(token, { attackerToken = null, activity = null } = {}) {
   const normalized = collectTokenStatusText(token).map((value) => normalizeKeywordText(value).replace(/\s+/g, ""));
-  const systemBonus = Math.max(0, Number(getActorSystem(token?.actor, "attributes.ac.cover") ?? token?.actor?.coverBonus ?? 0));
+  const systemBonus = normalizeCoverBonus(getActorSystem(token?.actor, "attributes.ac.cover") ?? token?.actor?.coverBonus);
+  const midiBonus = midiDynamicCoverBonus(attackerToken, token, activity);
+  const appliedBonus = midiBonus === Infinity ? Infinity : Math.max(systemBonus, midiBonus);
   if (normalized.some((value) => value.includes("covertotal") || value.includes("totalcover"))) {
-    return { level: 4, label: "Total Cover", bonus: 0, systemBonus, total: true };
+    return { level: 4, label: "Total Cover", bonus: 0, systemBonus, midiBonus, appliedBonus: Infinity, total: true };
   }
+  if (systemBonus === Infinity || midiBonus === Infinity) {
+    return { level: 4, label: "Total Cover", bonus: 0, systemBonus, midiBonus, appliedBonus: Infinity, total: true };
+  }
+
+  let cover = { level: 0, label: "", bonus: 0 };
   if (normalized.some((value) => value.includes("coverthreequarters") || value.includes("threequarterscover") || value.includes("threequartercover"))) {
-    return { level: 3, label: "Three-Quarters Cover", bonus: 5, systemBonus, total: false };
+    cover = { level: 3, label: "Three-Quarters Cover", bonus: 5 };
+  } else if (normalized.some((value) => value.includes("coverhalf") || value.includes("halfcover"))) {
+    cover = { level: 2, label: "Half Cover", bonus: 3 };
+  } else if (normalized.some((value) => value.includes("coverquarter") || value.includes("quartercover") || value.includes("onequartercover"))) {
+    cover = { level: 1, label: "One-Quarter Cover", bonus: 2 };
+  } else if (systemBonus >= 5) {
+    cover = { level: 3, label: "Three-Quarters Cover", bonus: 5 };
+  } else if (systemBonus >= 3) {
+    cover = { level: 2, label: "Half Cover", bonus: 3 };
+  } else if (systemBonus >= 2) {
+    cover = { level: 1, label: "One-Quarter Cover", bonus: 2 };
   }
-  if (normalized.some((value) => value.includes("coverhalf") || value.includes("halfcover"))) {
-    return { level: 2, label: "Half Cover", bonus: 3, systemBonus, total: false };
-  }
-  if (normalized.some((value) => value.includes("coverquarter") || value.includes("quartercover") || value.includes("onequartercover"))) {
-    return { level: 1, label: "One-Quarter Cover", bonus: 2, systemBonus, total: false };
-  }
-  if (systemBonus >= 5) return { level: 3, label: "Three-Quarters Cover", bonus: 5, systemBonus, total: false };
-  if (systemBonus >= 3) return { level: 2, label: "Half Cover", bonus: 3, systemBonus, total: false };
-  if (systemBonus >= 2) return { level: 1, label: "One-Quarter Cover", bonus: 2, systemBonus, total: false };
-  return { level: 0, label: "", bonus: 0, systemBonus, total: false };
+
+  const midiCover = midiBonus >= 5
+    ? { level: 3, label: "Three-Quarters Cover (Midi)", bonus: 5 }
+    : midiBonus >= 3
+      ? { level: 2, label: "Half Cover (Midi)", bonus: 3 }
+      : midiBonus >= 2
+        ? { level: 1, label: "One-Quarter Cover (Midi)", bonus: 2 }
+        : { level: 0, label: "", bonus: 0 };
+  if (midiCover.level > cover.level || midiCover.bonus > cover.bonus) cover = midiCover;
+  return { ...cover, systemBonus, midiBonus, appliedBonus, total: false };
 }
 
 function actorSharpshooterCoverBypass(actor) {
   const matches = [];
+  if (actor?.flags?.[MIDI_QOL_ID]?.sharpShooter || actor?.flags?.dnd5e?.sharpShooter) {
+    matches.push("Configured Sharpshooter flag");
+  }
+  if (actor?.flags?.dnd5e?.spellSniper) matches.push("Configured Spell Sniper flag");
   for (const item of actor?.items ?? []) {
     if (item.type !== "feat") continue;
     const text = normalizeKeywordText(`${item.name ?? ""} ${itemDescriptionText(item)} ${itemSourceLabel(item)}`);
@@ -671,7 +1017,7 @@ function actorSharpshooterCoverBypass(actor) {
     const sharpshooterCoverText = /\bsharpshooter\b/.test(text)
       && /\bcover\b/.test(text)
       && (/\b(ignore|ignores|ignored|ignoring)\b/.test(text) || /\b(benefit|benefits)\b/.test(text));
-    if (namedMastery || sharpshooterCoverText) matches.push(item.name ?? "Sharpshooter feat");
+    if ((namedMastery || sharpshooterCoverText) && !matches.includes(item.name)) matches.push(item.name ?? "Sharpshooter feat");
   }
   return matches;
 }
@@ -714,15 +1060,28 @@ function tokenFromMessageSpeaker(message) {
   return activeTokenForActor(actor);
 }
 
-function elevationSourceTokenForSave(process) {
+function elevationSourceTokenForSave(process, rollConfig) {
   const savingActor = process?.subject;
+  const workflow = midiWorkflowFromRollProcess(process, rollConfig);
+  const workflowToken = tokenFromMidiWorkflow(workflow);
+  if (workflowToken?.actor?.id && workflowToken.actor.id !== savingActor?.id) {
+    return {
+      token: workflowToken,
+      method: "midiWorkflow",
+      activity: workflow?.activity,
+      workflowId: workflow?.id
+    };
+  }
+
   const messageToken = tokenFromMessageSpeaker(originatingMessageFromRollProcess(process));
   if (messageToken?.actor?.id && messageToken.actor.id !== savingActor?.id) {
-    return { token: messageToken, method: "originatingMessage" };
+    return { token: messageToken, method: "originatingMessage", activity: null, workflowId: null };
   }
 
   const target = singleTargetToken();
-  if (target?.actor?.id && target.actor.id !== savingActor?.id) return { token: target, method: "target" };
+  if (target?.actor?.id && target.actor.id !== savingActor?.id) {
+    return { token: target, method: "target", activity: null, workflowId: null };
+  }
   return null;
 }
 
@@ -750,7 +1109,7 @@ function evaluateElevationAttackAdjustment(process, attackMode) {
     if (!rangedAttack) return null;
     const baseLevel = baseElevationDominance(verticalFeet, horizontalFeet);
     if (!baseLevel) return null;
-    const cover = targetCoverLevel(targetToken);
+    const cover = targetCoverLevel(targetToken, { attackerToken, activity });
     if (cover.total) return null;
     const sharpshooterMatches = actorSharpshooterCoverBypass(actor);
     const coverIgnored = cover.level > 0 && sharpshooterMatches.length > 0;
@@ -771,7 +1130,7 @@ function evaluateElevationAttackAdjustment(process, attackMode) {
       level: effectiveLevel,
       baseLevel,
       bonus,
-      formulaAdjustment: cover.systemBonus + bonus,
+      formulaAdjustment: cover.appliedBonus + bonus,
       formulaLabel: `${effective?.label ?? "Dominance negated"} ranged attack${coverLabel ? `; ${coverLabel}` : ""}`,
       cover: {
         ...cover,
@@ -783,7 +1142,7 @@ function evaluateElevationAttackAdjustment(process, attackMode) {
 
   const baseLevel = baseElevationDominance(-verticalFeet, horizontalFeet);
   if (!baseLevel) return null;
-  const cover = targetCoverLevel(targetToken);
+  const cover = targetCoverLevel(targetToken, { attackerToken, activity });
   if (cover.total) return null;
   const sharpshooterMatches = actorSharpshooterCoverBypass(actor);
   const coverIgnored = rangedAttack && cover.level > 0 && sharpshooterMatches.length > 0;
@@ -801,7 +1160,7 @@ function evaluateElevationAttackAdjustment(process, attackMode) {
     baseLevel,
     bonus: dominance.bonus,
     acBonus: desiredDefense,
-    formulaAdjustment: cover.systemBonus - desiredDefense,
+    formulaAdjustment: cover.appliedBonus - desiredDefense,
     formulaLabel: `${dominance.label} target AC +${desiredDefense}${cover.label ? `; uses ${defenseLabel}` : ""}`,
     cover: {
       ...cover,
@@ -824,24 +1183,25 @@ function handleElevationPostBuildAttackRollConfig(process, rollConfig, index) {
   rollConfig.options.swvrElevation = detail;
 }
 
-function evaluateElevationDexSaveAdjustment(process) {
+function evaluateElevationDexSaveAdjustment(process, rollConfig) {
   if (!isEnabled("elevation") || String(process?.ability ?? "").toLowerCase() !== "dex") return null;
   const savingActor = process?.subject;
   const savingToken = activeTokenForActor(savingActor);
-  const source = elevationSourceTokenForSave(process);
+  const source = elevationSourceTokenForSave(process, rollConfig);
   const sourceToken = source?.token;
   const sourceActor = sourceToken?.actor;
   if (!savingActor || !savingToken || !sourceActor || !sourceToken) return null;
 
   const verticalFeet = tokenElevation(savingToken) - tokenElevation(sourceToken);
   const horizontalFeet = horizontalTokenDistance(savingToken, sourceToken);
-  const cover = targetCoverLevel(savingToken);
+  const cover = targetCoverLevel(savingToken, { attackerToken: sourceToken, activity: source.activity });
   if (cover.total) return null;
   const sharpshooterMatches = actorSharpshooterCoverBypass(sourceActor);
   const coverIgnored = cover.level > 0 && sharpshooterMatches.length > 0;
   const common = {
     source: "SW5e Elevation",
     sourceResolution: source.method,
+    workflowId: source.workflowId,
     verticalFeet: Math.round(verticalFeet * 100) / 100,
     horizontalFeet: Math.round(horizontalFeet * 100) / 100,
     saver: elevationParticipant(savingToken),
@@ -869,7 +1229,7 @@ function evaluateElevationDexSaveAdjustment(process) {
       baseLevel: level,
       bonus: dominance.bonus,
       saveBonus: desiredBonus,
-      formulaAdjustment: desiredBonus - cover.systemBonus,
+      formulaAdjustment: desiredBonus - cover.appliedBonus,
       formulaLabel: `${dominance.label} Dexterity save +${desiredBonus}${cover.label ? `; uses ${defenseLabel}` : ""}`
     };
   }
@@ -894,14 +1254,14 @@ function evaluateElevationDexSaveAdjustment(process) {
     baseLevel,
     bonus: penalty,
     savePenalty: penalty,
-    formulaAdjustment: -cover.systemBonus - penalty,
+    formulaAdjustment: -cover.appliedBonus - penalty,
     formulaLabel: `${effective?.label ?? "Dominance negated"} Dexterity save penalty${penalty ? ` -${penalty}` : ""}${coverLabel ? `; ${coverLabel}` : ""}`
   };
 }
 
 function handleElevationPostBuildSavingThrowRollConfig(process, rollConfig, index) {
   if (index !== 0 || !isEnabled("elevation")) return;
-  const detail = evaluateElevationDexSaveAdjustment(process);
+  const detail = evaluateElevationDexSaveAdjustment(process, rollConfig);
   if (!detail) return;
   rollConfig.parts ??= [];
   if (rollConfig.parts.some((part) => String(part).includes("SWVR Elevation"))) return;
@@ -911,7 +1271,7 @@ function handleElevationPostBuildSavingThrowRollConfig(process, rollConfig, inde
 }
 
 function handleAlternativeArmorPostBuildAttackRollConfig(_process, rollConfig, index) {
-  if (index !== 0 || !isEnabled("alternative-armor")) return;
+  if (index !== 0 || !alternativeArmorAutomationAvailable()) return;
   const target = singleTargetToken();
   const actor = target?.actor;
   if (!actor) return;
@@ -951,7 +1311,7 @@ function handleElevationPostSavingThrowRollConfiguration(rolls, _process, _dialo
 }
 
 function handleAlternativeArmorPostAttackRollConfiguration(rolls, _process, _dialog, message) {
-  if (!isEnabled("alternative-armor")) return;
+  if (!alternativeArmorAutomationAvailable()) return;
   const detail = rolls?.[0]?.options?.swvrAlternativeArmor;
   if (!detail) return;
   foundry.utils.setProperty(message, `data.flags.${MODULE_ID}.alternativeArmor`, detail);
@@ -985,6 +1345,26 @@ function armorDexCap(item) {
   return Number.isFinite(Number(cap)) ? Number(cap) : Infinity;
 }
 
+function hasConfiguredDamageModification(actor) {
+  const damageModification = getActorSystem(actor, "traits.dm");
+  if (!damageModification) return false;
+  const values = [];
+  const collect = (value) => {
+    if (value === null || value === undefined || value === "") return;
+    if (typeof value === "object") {
+      for (const nested of Object.values(value)) collect(nested);
+      return;
+    }
+    values.push(value);
+  };
+  collect(damageModification.amount);
+  collect(damageModification.midi);
+  return values.some((value) => {
+    if (typeof value === "number") return value !== 0;
+    return String(value).trim() !== "" && String(value).trim() !== "0";
+  });
+}
+
 function alternativeArmorSummary(actor) {
   const ac = getActorSystem(actor, "attributes.ac") ?? {};
   const armor = equippedArmor(actor);
@@ -994,6 +1374,12 @@ function alternativeArmorSummary(actor) {
   const prof = actorProficiencyBonus(actor);
   const details = [];
   const warnings = [];
+  if (midiChallengeModeArmorActive()) {
+    warnings.push("Alternative Armor automation is paused while Midi Challenge Mode Armor is active.");
+  }
+  if (midiWorkflowEnabled() && hasConfiguredDamageModification(actor)) {
+    warnings.push("Midi/DAE damage modification fields are present and may stack with Alternative Armor DR.");
+  }
 
   let dexToAc = dexMod;
   let dr = 0;
@@ -1072,7 +1458,7 @@ function isAttackActivity(subject) {
 }
 
 function markAlternativeArmorAttackDamage(rolls, data) {
-  if (!isEnabled("alternative-armor") || !isAttackActivity(data?.subject)) return;
+  if (!alternativeArmorAutomationAvailable() || !isAttackActivity(data?.subject)) return;
   for (const roll of rolls ?? []) {
     roll.options ??= {};
     roll.options.properties ??= [];
@@ -1089,7 +1475,8 @@ function hasAlternativeArmorAttackMarker(damages) {
 }
 
 function applyAlternativeArmorDamageReduction(actor, damages, options = {}) {
-  if (!isEnabled("alternative-armor") || !hasAlternativeArmorAttackMarker(damages)) return;
+  if (options?.swvrAlternativeArmor?.applied) return;
+  if (!alternativeArmorAutomationAvailable() || !hasAlternativeArmorAttackMarker(damages)) return;
   if (options?.only === "healing" || damages.amount <= 0) return;
 
   const summary = alternativeArmorSummary(actor);
@@ -2330,16 +2717,24 @@ async function recordForceAlignmentCast(payload) {
   });
 }
 
-async function handleForceAlignmentPowerCast(item) {
-  if (!isEnabled("force-alignment") || !isForceAlignmentPowerItem(item)) return;
-  const dedupeKey = `${game.user.id}:${item.uuid ?? item.id}:${item.actor?.id ?? ""}`;
+function claimPowerCast(map, item, workflowKey = "") {
   const now = Date.now();
-  const recent = RECENT_ALIGNMENT_CASTS.get(dedupeKey);
-  if (recent && now - recent < 1500) return;
-  RECENT_ALIGNMENT_CASTS.set(dedupeKey, now);
-  for (const [key, timestamp] of RECENT_ALIGNMENT_CASTS.entries()) {
-    if (now - timestamp > 5000) RECENT_ALIGNMENT_CASTS.delete(key);
+  const dedupeKey = workflowKey
+    ? `${game.user.id}:${workflowKey}`
+    : `${game.user.id}:${item?.uuid ?? item?.id}:${item?.actor?.id ?? ""}`;
+  const recent = map.get(dedupeKey);
+  const duplicateWindow = workflowKey ? 10 * 60 * 1000 : 1500;
+  if (recent && now - recent < duplicateWindow) return false;
+  map.set(dedupeKey, now);
+  for (const [key, timestamp] of map.entries()) {
+    if (now - timestamp > 10 * 60 * 1000) map.delete(key);
   }
+  return true;
+}
+
+async function handleForceAlignmentPowerCast(item, workflowKey = "") {
+  if (!isEnabled("force-alignment") || !isForceAlignmentPowerItem(item)) return;
+  if (!claimPowerCast(RECENT_ALIGNMENT_CASTS, item, workflowKey)) return;
 
   const payload = {
     actorUuid: item.actor?.uuid,
@@ -2741,20 +3136,12 @@ async function handleHuntedCombatEnd(combat) {
   refreshHuntedLogWindows();
 }
 
-async function handleHuntedForcePowerCast(item) {
+async function handleHuntedForcePowerCast(item, workflowKey = "") {
   if (!isEnabled("hunted") || !isForcePowerItem(item)) return;
   const actor = item.actor;
   const combat = activeCombatForActor(actor);
   if (!combat) return;
-
-  const dedupeKey = `${game.user.id}:${item.uuid ?? item.id}:${item.actor?.id ?? ""}`;
-  const now = Date.now();
-  const recent = RECENT_HUNTED_CASTS.get(dedupeKey);
-  if (recent && now - recent < 1500) return;
-  RECENT_HUNTED_CASTS.set(dedupeKey, now);
-  for (const [key, timestamp] of RECENT_HUNTED_CASTS.entries()) {
-    if (now - timestamp > 5000) RECENT_HUNTED_CASTS.delete(key);
-  }
+  if (!claimPowerCast(RECENT_HUNTED_CASTS, item, workflowKey)) return;
 
   const user = resolveUserForActor(actor, game.user.id);
   const level = forcePowerLevel(item);
@@ -2931,6 +3318,7 @@ class VariantRulesConfig extends FormApplication {
       sourceUrl: SOURCE_URL,
       chatReminders: game.settings.get(MODULE_ID, "chatReminders"),
       useModifiedActorSheet: useModifiedActorSheet(),
+      midiCompatibility: midiCompatibilityState(),
       categories
     };
   }
@@ -2954,6 +3342,7 @@ class VariantRulesConfig extends FormApplication {
     if (previous["simplified-forcecasting"] !== enabled["simplified-forcecasting"]) {
       await syncSw5eSimplifiedForcecastingSetting(enabled["simplified-forcecasting"]);
     }
+    notifyMidiCompatibilityConflicts();
   }
 
   activateListeners(html) {
@@ -2966,6 +3355,14 @@ class VariantRulesConfig extends FormApplication {
     });
     html.find("[data-action='report']").on("click", () => new VariantRulesReport().render(true));
     html.find("[data-action='hunted-log']").on("click", () => new HuntedDisturbanceLog().render(true));
+    html.find("[data-action='midi-apply']").on("click", async () => {
+      await applyRecommendedMidiCompatibilitySettings();
+      this.render(false);
+    });
+    html.find("[data-action='midi-restore']").on("click", async () => {
+      await restoreMidiCompatibilitySettings();
+      this.render(false);
+    });
   }
 }
 
@@ -3922,6 +4319,14 @@ Hooks.once("init", () => {
     default: {}
   });
 
+  game.settings.register(MODULE_ID, "midiCompatibilityBackup", {
+    name: "Midi-QOL Compatibility Backup",
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {}
+  });
+
   game.settings.registerMenu(MODULE_ID, "config", {
     name: "Configure Variant Rules",
     label: "Configure Rules",
@@ -3951,6 +4356,7 @@ Hooks.once("ready", () => {
     if (isEnabled("crueler-criticals")) syncCruelerCriticalsSetting(true);
     if (isEnabled("asi-feat")) syncSw5eAsiAndFeatSetting(true);
     if (isEnabled("simplified-forcecasting")) syncSw5eSimplifiedForcecastingSetting(true);
+    notifyMidiCompatibilityConflicts();
   }
 
   game.socket.on(`module.${MODULE_ID}`, (message) => {
@@ -4005,6 +4411,9 @@ Hooks.once("ready", () => {
     applyGestaltHitDieToPrimary,
     syncGestaltClassHitDice,
     alternativeArmorSummary,
+    midiCompatibilityState,
+    applyRecommendedMidiCompatibilitySettings,
+    restoreMidiCompatibilitySettings,
     applyTacticalInitiative
   };
 });
@@ -4037,8 +4446,10 @@ function usedItemFromActivity(activity) {
 
 async function handleUseItem(candidate) {
   const item = usedItemFromHook(candidate);
-  await handleHuntedForcePowerCast(item);
-  await handleForceAlignmentPowerCast(item);
+  if (!midiWorkflowEnabled()) {
+    await handleHuntedForcePowerCast(item);
+    await handleForceAlignmentPowerCast(item);
+  }
 
   if (item?.type === "consumable") {
     postEnabledRuleReminder("bonus-action-consumables", `${item.name} may be usable as a bonus action if its normal activation is not already a bonus action.`);
@@ -4050,9 +4461,20 @@ async function handleUseItem(candidate) {
 }
 
 async function handleUseActivity(activity) {
+  if (midiWorkflowEnabled()) return;
   const item = usedItemFromActivity(activity);
   await handleHuntedForcePowerCast(item);
   await handleForceAlignmentPowerCast(item);
+}
+
+async function handleMidiWorkflowComplete(workflow) {
+  if (!midiWorkflowEnabled() || !workflow) return;
+  const item = workflow.item ?? workflow.activity?.item;
+  if (!item) return;
+  const workflowId = workflow.id ?? workflow.uuid ?? workflow.itemCardUuid;
+  const workflowKey = workflowId ? `midi:${workflowId}` : "";
+  await handleHuntedForcePowerCast(item, workflowKey);
+  await handleForceAlignmentPowerCast(item, workflowKey);
 }
 
 function handleRollAbilityTest(_actor, _roll, abilityId) {
@@ -4076,6 +4498,8 @@ Hooks.on("dnd5e.rollDamage", markAlternativeArmorAttackDamage);
 Hooks.on("sw5e.rollDamage", markAlternativeArmorAttackDamage);
 Hooks.on("dnd5e.calculateDamage", applyAlternativeArmorDamageReduction);
 Hooks.on("sw5e.calculateDamage", applyAlternativeArmorDamageReduction);
+Hooks.on("midi-qol.dnd5eCalculateDamage", applyAlternativeArmorDamageReduction);
+Hooks.on("midi-qol.RollComplete", handleMidiWorkflowComplete);
 Hooks.on("dnd5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("sw5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("renderActorSheet", (app, html) => safeRenderActorPanel("Force Alignment", renderForceAlignmentActorPanel, app, html));

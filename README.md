@@ -9,6 +9,9 @@ This module is intended for GMs who want table-level control over variant rule o
 - Foundry VTT: v13 minimum
 - D&D5e System: 5.2.5 minimum
 - Required module: SW5e module 1.3.8 minimum
+- Optional integration: Midi-QOL v13
+
+When Midi-QOL is active, the SWVR configuration window displays a compatibility report. GMs can apply confirmed recommended settings and later restore the values SWVR backed up. SWVR does not silently change Midi-QOL configuration.
 
 ## Installation
 
@@ -63,6 +66,15 @@ After enabling the module in a world, open:
 **Game Settings > Configure Settings > Module Settings > SW5e Variant Rules**
 
 From there, GMs can enable or disable individual variant rules, open the applicability report, and review the Hunted log.
+
+### Midi-QOL Compatibility
+
+- Elevation queries Midi's configured cover provider and compensates for Midi's later token-origin attack and Dexterity-save cover processing. Template-origin cover can differ and remains subject to GM review.
+- Midi workflow IDs are used to resolve the source of automated Dexterity saves and deduplicate Hunted/Force Alignment casts.
+- Alternative Armor DR runs through Midi's post-calculation hook and remains idempotent when the normal D&D5e hook also fires.
+- Alternative Armor automation pauses while Midi Challenge Mode Armor is active.
+- The compatibility action can disable Challenge Mode Armor, custom Midi critical damage, Midi Critical Saves, and Midi's percentage-based Wounded status when the corresponding SWVR rules require ownership of those mechanics.
+- Midi Active Defence can remain enabled as the mechanical provider for SWVR's otherwise manual Defense Rolls option.
 
 ## Bug Reports
 

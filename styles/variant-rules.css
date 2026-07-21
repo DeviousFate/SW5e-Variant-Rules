@@ -1,7 +1,83 @@
 .sw5e-vr-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin: 0.75rem 0;
+}
+
+.sw5e-vr-midi-compatibility {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.22);
+  border-top: 1px solid rgba(0, 0, 0, 0.22);
+  margin: 0.75rem 0;
+  padding: 0.65rem 0;
+}
+
+.sw5e-vr-midi-compatibility header,
+.sw5e-vr-midi-compatibility li > div,
+.sw5e-vr-midi-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sw5e-vr-midi-compatibility header h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.sw5e-vr-midi-compatibility header > span,
+.sw5e-vr-midi-status {
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.22rem 0.35rem;
+}
+
+.sw5e-vr-midi-compatibility > p {
+  margin: 0.4rem 0;
+}
+
+.sw5e-vr-midi-compatibility ol {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+
+.sw5e-vr-midi-compatibility li {
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 0.45rem 0;
+}
+
+.sw5e-vr-midi-compatibility li > div strong {
+  flex: 1;
+}
+
+.sw5e-vr-midi-compatibility li small {
+  display: block;
+  line-height: 1.35;
+  margin-top: 0.18rem;
+}
+
+.sw5e-vr-midi-status.conflict {
+  background: #8d2525;
+  color: #fff;
+}
+
+.sw5e-vr-midi-status.adapted {
+  background: #176f68;
+  color: #fff;
+}
+
+.sw5e-vr-midi-status.handled {
+  background: #285f87;
+  color: #fff;
+}
+
+.sw5e-vr-midi-actions {
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
 }
 
 .sw5e-vr-rule-list {

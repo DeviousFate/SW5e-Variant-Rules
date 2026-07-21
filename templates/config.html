@@ -23,6 +23,38 @@
     <button type="button" data-action="hunted-log"><i class="fas fa-wave-square"></i> Hunted Log</button>
   </div>
 
+  <section class="sw5e-vr-midi-compatibility {{#if midiCompatibility.active}}active{{else}}inactive{{/if}}">
+    <header>
+      <h2>Midi-QOL Compatibility</h2>
+      {{#if midiCompatibility.active}}<span>v{{midiCompatibility.version}}</span>{{/if}}
+    </header>
+    <p>{{midiCompatibility.summary}}</p>
+    {{#if midiCompatibility.hasEntries}}
+      <ol>
+        {{#each midiCompatibility.entries}}
+          <li>
+            <div>
+              <strong>{{label}}</strong>
+              <span class="sw5e-vr-midi-status {{statusClass}}">{{status}}</span>
+            </div>
+            <small>{{detail}}</small>
+            <small><b>Current:</b> {{current}} <b>Recommended:</b> {{recommended}}</small>
+          </li>
+        {{/each}}
+      </ol>
+    {{/if}}
+    {{#if midiCompatibility.active}}
+      <div class="sw5e-vr-midi-actions">
+        {{#if midiCompatibility.hasActionable}}
+          <button type="button" data-action="midi-apply"><i class="fas fa-shield-alt"></i> Apply Recommended Settings</button>
+        {{/if}}
+        {{#if midiCompatibility.hasBackup}}
+          <button type="button" data-action="midi-restore"><i class="fas fa-undo"></i> Restore Previous Settings</button>
+        {{/if}}
+      </div>
+    {{/if}}
+  </section>
+
   {{#each categories}}
     <h2>{{label}}</h2>
     <ol class="sw5e-vr-rule-list">
