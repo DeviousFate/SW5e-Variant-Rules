@@ -2,12 +2,34 @@ const MODULE_ID = (() => {
   const match = import.meta.url.match(/\/modules\/([^/]+)\//);
   return match ? decodeURIComponent(match[1]) : "sw5e-variant-rules";
 })();
+const IS_DEV_BUILD = MODULE_ID.endsWith("-dev");
 const SOURCE_URL = "https://sw5e.com/rules/variantRules";
 const SW5E_SETTING_NAMESPACES = ["sw5e-module", "sw5e"];
 const MIDI_QOL_ID = "midi-qol";
+const MIDI_COMPATIBILITY_CONFLICTS = {
+  "challenge-mode-armor": {
+    ruleId: "alternative-armor",
+    paths: ["optionalRules.challengeModeArmor"]
+  },
+  "critical-damage": {
+    ruleId: "crueler-criticals",
+    paths: ["criticalDamage", "criticalDamageGM"]
+  },
+  "critical-saves": {
+    ruleId: "critical-saving-throws",
+    paths: ["optionalRules.criticalSaves"]
+  },
+  "wounded-status": {
+    ruleId: "wounds",
+    paths: ["addWounded", "addWoundedStyle"]
+  }
+};
 const RECENT_HUNTED_CASTS = new Map();
 const RECENT_HUNTED_RESTS = new Map();
 const RECENT_ALIGNMENT_CASTS = new Map();
+const RECENT_DISMEMBERMENT_ATTACKS = new Map();
+const PROCESSED_DISMEMBERMENT_ROLLS = new WeakSet();
+const OBSERVED_DISMEMBERMENT_ROLLS = new WeakSet();
 const RESOLVED_HUNTED_COMBATS = new Set();
 const ALTERNATIVE_ARMOR_ATTACK_PROPERTY = "swvr-alt-armor-attack";
 const ELEVATION_LEVELS = {
@@ -24,6 +46,13 @@ const HUNTED_STATUS_LADDER = [
   { count: 5, label: "Hunted", description: "Hunters have identified the quarry and are prepared to act." }
 ];
 const HUNTED_MAX_TIER = HUNTED_STATUS_LADDER[HUNTED_STATUS_LADDER.length - 1].count;
+const DISMEMBERMENT_RESULTS = [
+  { minimum: 1, maximum: 40, bodyPart: "hand", detail: "Choose the affected hand randomly when applicable." },
+  { minimum: 41, maximum: 70, bodyPart: "both hands", detail: "If more than two hands are present, choose two of them randomly." },
+  { minimum: 71, maximum: 90, bodyPart: "leg", detail: "Halve speed if another leg remains; otherwise reduce speed to 0 and knock the target prone." },
+  { minimum: 91, maximum: 98, bodyPart: "both legs", detail: "Halve speed if more than two legs remain; otherwise reduce speed to 0 and knock the target prone." },
+  { minimum: 99, maximum: 100, bodyPart: "head", detail: "The target dies only if it cannot survive without the lost head." }
+];
 const FORCE_ALIGNMENT_DEFAULT = {
   value: 0,
   seenPowers: { lgt: {}, drk: {} },
@@ -176,7 +205,7 @@ const RULES = [
   rule("crueler-criticals", "Crueler Criticals", "combat", "Automated", "Critical hits maximize one set of damage dice and roll the additional critical dice.", "When enabled, D&D5e Critical Damage Max Dice is turned on. When disabled, it is turned off."),
   rule("defense-rolls", "Defense Rolls", "combat", "Manual", "Players roll defenses instead of enemies rolling attacks against static defenses.", "This inverts the attack workflow and cannot be safely layered over normal SW5e attack resolution."),
   rule("destiny", "Destiny", "character", "Manual", "Characters use destiny-based rewards and spend options.", "Destiny awards and spend timing are narrative campaign management."),
-  rule("dismemberment", "Dismemberment", "combat", "Manual", "Major injuries can remove or impair limbs under severe combat outcomes.", "The rule is injury adjudication and character-state narration, not a single mechanical flag."),
+  rule("dismemberment", "Dismemberment", "combat", "Automated", "Critical hits with lightweapons and vibroweapons can trigger a confirmation roll and random dismemberment result.", "Automates qualifying critical detection, immunity/resistance checks, the confirmation d20, and the d100 result. A GM prompt approves eligibility or selects Legendary Resistance, missing-limb substitution damage, or ineligibility before themed chat output. Resulting conditions, damage, and resource consumption remain manual."),
   rule("dueling", "Dueling", "combat", "Manual", "Formal duels can use special pacing or restrictions.", "Who is dueling, when outside interference matters, and what constraints apply are narrative state."),
   rule("elevation", "Elevation", "combat", "Automated", "Creatures at sufficient height and horizontal distance gain the Elevation attack, AC, and Dexterity-save adjustments.", "Automated for attacks against one targeted token and Dexterity saves whose controlling creature can be resolved from the originating activity message or one targeted token. Cover and detected Sharpshooter Mastery-style feats modify the relational bonuses as prescribed. The advantage/disadvantage guidance remains GM-adjudicated."),
   rule("exertion", "Exertion", "combat", "Manual", "Characters can push beyond normal limits at a cost such as exhaustion.", "The trigger and acceptable cost are player and GM choices."),
@@ -418,27 +447,112 @@ function confirmCompatibilityChange(title, content, confirmLabel) {
 
 function midiCompatibilityRecommendedChanges(config) {
   const changes = [];
+  const optionalRulesActive = midiWorkflowEnabled() && midiOptionalRulesActive(config);
   const set = (path, value, label) => {
     const current = foundry.utils.getProperty(config, path);
     if (current === value) return;
     changes.push({ path, current, value, label });
   };
 
-  if (isEnabled("alternative-armor") && midiWorkflowEnabled()) {
+  if (isEnabled("alternative-armor") && optionalRulesActive && ![undefined, false, "none"].includes(config.optionalRules?.challengeModeArmor)) {
     set("optionalRules.challengeModeArmor", "none", "Disable Midi Challenge Mode Armor");
   }
   if (isEnabled("crueler-criticals")) {
     set("criticalDamage", "default", "Use D&D5e critical damage for players");
     set("criticalDamageGM", "default", "Use D&D5e critical damage for the GM");
   }
-  if (isEnabled("critical-saving-throws") && midiWorkflowEnabled()) {
+  if (isEnabled("critical-saving-throws") && optionalRulesActive && Boolean(config.optionalRules?.criticalSaves)) {
     set("optionalRules.criticalSaves", false, "Disable Midi Critical Saves");
   }
-  if (isEnabled("wounds")) {
+  if (isEnabled("wounds") && Number(config.addWounded ?? 0) > 0 && String(config.addWoundedStyle ?? "none") !== "none") {
     set("addWounded", 0, "Disable Midi percentage-based Wounded threshold");
     set("addWoundedStyle", "none", "Disable Midi percentage-based Wounded style");
   }
   return changes;
+}
+
+function midiCompatibilityChangesForConflict(config, conflictId) {
+  const conflict = MIDI_COMPATIBILITY_CONFLICTS[conflictId];
+  if (!conflict) return [];
+  return midiCompatibilityRecommendedChanges(config).filter((change) => conflict.paths.includes(change.path));
+}
+
+async function backupAndApplyMidiCompatibilityChanges(config, changes) {
+  const existingBackup = game.settings.get(MODULE_ID, "midiCompatibilityBackup") ?? {};
+  const backupValues = foundry.utils.deepClone(existingBackup.values ?? {});
+  for (const change of changes) {
+    if (!Object.prototype.hasOwnProperty.call(backupValues, change.path)) backupValues[change.path] = change.current;
+    foundry.utils.setProperty(config, change.path, change.value);
+  }
+  await game.settings.set(MODULE_ID, "midiCompatibilityBackup", {
+    version: midiQolVersion(),
+    savedAt: existingBackup.savedAt ?? new Date().toISOString(),
+    values: backupValues
+  });
+  await game.settings.set(MIDI_QOL_ID, "ConfigSettings", config);
+}
+
+async function restoreMidiCompatibilityPaths(paths) {
+  const backup = game.settings.get(MODULE_ID, "midiCompatibilityBackup") ?? {};
+  const backupValues = foundry.utils.deepClone(backup.values ?? {});
+  const config = midiConfigSettings();
+  if (!config) return 0;
+
+  let restored = 0;
+  for (const path of paths) {
+    if (!Object.prototype.hasOwnProperty.call(backupValues, path)) continue;
+    foundry.utils.setProperty(config, path, backupValues[path]);
+    delete backupValues[path];
+    restored += 1;
+  }
+  if (!restored) return 0;
+
+  await game.settings.set(MIDI_QOL_ID, "ConfigSettings", config);
+  await game.settings.set(MODULE_ID, "midiCompatibilityBackup", Object.keys(backupValues).length
+    ? { ...backup, values: backupValues }
+    : {});
+  return restored;
+}
+
+async function resolveMidiCompatibilityConflict(conflictId, provider) {
+  if (!game.user.isGM || !midiQolActive()) return;
+  const conflict = MIDI_COMPATIBILITY_CONFLICTS[conflictId];
+  if (!conflict || !["swvr", "midi"].includes(provider)) return;
+
+  const ruleName = RULES.find((ruleData) => ruleData.id === conflict.ruleId)?.name ?? conflict.ruleId;
+  if (provider === "swvr") {
+    const config = midiConfigSettings();
+    if (!config) return;
+    const changes = midiCompatibilityChangesForConflict(config, conflictId);
+    if (!changes.length) {
+      ui.notifications.info(`${ruleName} no longer has an active Midi-QOL conflict.`);
+      return;
+    }
+    const confirmed = await confirmCompatibilityChange(
+      `Use SWVR: ${ruleName}`,
+      `<p>Use SWVR for <strong>${ruleName}</strong> and disable only the competing Midi-QOL setting?</p><ul>${changes.map((change) => `<li>${change.label}</li>`).join("")}</ul><p>The current Midi-QOL values will be retained for restoration.</p>`,
+      "Use SWVR"
+    );
+    if (!confirmed) return;
+    await backupAndApplyMidiCompatibilityChanges(config, changes);
+    if (conflict.ruleId === "crueler-criticals") await syncCruelerCriticalsSetting(true);
+    ui.notifications.info(`SWVR now provides ${ruleName}.`);
+    return;
+  }
+
+  const confirmed = await confirmCompatibilityChange(
+    `Use Midi-QOL: ${ruleName}`,
+    `<p>Use Midi-QOL for <strong>${ruleName}</strong>?</p><p>The corresponding SWVR rule will be disabled. Any Midi-QOL values previously backed up for this conflict will be restored.</p>`,
+    "Use Midi-QOL"
+  );
+  if (!confirmed) return;
+
+  const enabled = enabledRules();
+  enabled[conflict.ruleId] = false;
+  await setEnabledRules(enabled);
+  if (conflict.ruleId === "crueler-criticals") await syncCruelerCriticalsSetting(false);
+  await restoreMidiCompatibilityPaths(conflict.paths);
+  ui.notifications.info(`Midi-QOL now provides ${ruleName}; the SWVR rule was disabled.`);
 }
 
 async function applyRecommendedMidiCompatibilitySettings() {
@@ -452,25 +566,17 @@ async function applyRecommendedMidiCompatibilitySettings() {
   }
 
   const confirmed = await confirmCompatibilityChange(
-    "Apply Midi-QOL Compatibility Settings",
-    `<p>SWVR will make the following Midi-QOL configuration changes:</p><ul>${changes.map((change) => `<li>${change.label}</li>`).join("")}</ul><p>The previous values will be retained for restoration.</p>`,
-    "Apply Settings"
+    "Use SWVR for All Conflicts",
+    `<p>Use SWVR for all active conflicts by making the following Midi-QOL configuration changes?</p><ul>${changes.map((change) => `<li>${change.label}</li>`).join("")}</ul><p>The previous values will be retained for restoration.</p>`,
+    "Use SWVR"
   );
   if (!confirmed) return;
 
-  const existingBackup = game.settings.get(MODULE_ID, "midiCompatibilityBackup") ?? {};
-  const backupValues = foundry.utils.deepClone(existingBackup.values ?? {});
-  for (const change of changes) {
-    if (!Object.prototype.hasOwnProperty.call(backupValues, change.path)) backupValues[change.path] = change.current;
-    foundry.utils.setProperty(config, change.path, change.value);
+  await backupAndApplyMidiCompatibilityChanges(config, changes);
+  if (changes.some((change) => ["criticalDamage", "criticalDamageGM"].includes(change.path))) {
+    await syncCruelerCriticalsSetting(true);
   }
-  await game.settings.set(MODULE_ID, "midiCompatibilityBackup", {
-    version: midiQolVersion(),
-    savedAt: new Date().toISOString(),
-    values: backupValues
-  });
-  await game.settings.set(MIDI_QOL_ID, "ConfigSettings", config);
-  ui.notifications.info("Recommended Midi-QOL compatibility settings applied.");
+  ui.notifications.info("SWVR now provides all selected conflicting rules.");
 }
 
 async function restoreMidiCompatibilitySettings() {
@@ -482,16 +588,12 @@ async function restoreMidiCompatibilitySettings() {
   }
   const confirmed = await confirmCompatibilityChange(
     "Restore Midi-QOL Settings",
-    "<p>Restore the Midi-QOL values saved before SWVR applied its compatibility recommendations?</p>",
+    "<p>Restore the Midi-QOL values saved before SWVR resolved the selected conflicts?</p>",
     "Restore Settings"
   );
   if (!confirmed) return;
 
-  const config = midiConfigSettings();
-  if (!config) return;
-  for (const [path, value] of Object.entries(backup.values)) foundry.utils.setProperty(config, path, value);
-  await game.settings.set(MIDI_QOL_ID, "ConfigSettings", config);
-  await game.settings.set(MODULE_ID, "midiCompatibilityBackup", {});
+  await restoreMidiCompatibilityPaths(Object.keys(backup.values));
   ui.notifications.info("Previous Midi-QOL settings restored.");
 }
 
@@ -1268,6 +1370,489 @@ function handleElevationPostBuildSavingThrowRollConfig(process, rollConfig, inde
   rollConfig.parts.push(elevationRollPart(detail.formulaAdjustment, detail.formulaLabel));
   rollConfig.options ??= {};
   rollConfig.options.swvrElevationSave = detail;
+}
+
+function dismembermentWeaponCategory(item) {
+  if (item?.type !== "weapon") return null;
+  const values = [
+    item.system?.type?.value,
+    item.system?.type?.subtype,
+    item.system?.type?.custom,
+    item.labels?.type
+  ].filter(Boolean);
+  const lightweaponTypes = new Set(["slw", "mlw", "elw", "simplelw", "martiallw", "exoticlw"]);
+  const vibroweaponTypes = new Set([
+    "svb", "mvb", "evw",
+    "simplev", "simplevb", "simplevw",
+    "martialv", "martialvb", "martialvw",
+    "exoticv", "exoticvb", "exoticvw"
+  ]);
+
+  for (const value of values) {
+    const normalized = String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (lightweaponTypes.has(normalized) || normalized.includes("lightweapon")) return "Lightweapon";
+    if (vibroweaponTypes.has(normalized) || normalized.includes("vibroweapon")) return "Vibroweapon";
+  }
+  return null;
+}
+
+function isDismembermentCriticalRoll(roll) {
+  if (!roll) return false;
+  try {
+    if (roll.isCritical === true) return true;
+  } catch (_error) {
+    // Fall through to the evaluated d20 total for integration-modified rolls.
+  }
+
+  const threshold = Number(roll.options?.criticalSuccess ?? 20);
+  let d20;
+  try {
+    d20 = roll.d20;
+  } catch (_error) {
+    d20 = null;
+  }
+  d20 ??= roll.dice?.find((die) => Number(die?.faces) === 20);
+  if (Number.isFinite(Number(d20?.total))) return Number(d20.total) >= threshold;
+
+  return Array.from(d20?.results ?? []).some((result) => {
+    const active = result?.active !== false && result?.discarded !== true;
+    return active && Number(result?.result) >= threshold;
+  });
+}
+
+function dismembermentWeaponTypeLabel(item) {
+  return item?.system?.type?.label
+    ?? item?.labels?.type
+    ?? item?.system?.type?.value
+    ?? "unconfigured";
+}
+
+function forceDismembermentConfirmationEnabled() {
+  const settingId = `${MODULE_ID}.forceDismembermentConfirmation`;
+  return IS_DEV_BUILD
+    && game.settings.settings.has(settingId)
+    && game.settings.get(MODULE_ID, "forceDismembermentConfirmation");
+}
+
+function dismembermentDamageTypeId(value) {
+  const normalized = normalizeKeywordText(value).replace(/\s+/g, "");
+  if (!normalized) return "";
+  const configured = CONFIG?.DND5E?.damageTypes ?? {};
+  for (const [id, data] of Object.entries(configured)) {
+    const label = game.i18n?.localize?.(data?.label ?? data) ?? data?.label ?? data;
+    if ([id, label].some((entry) => normalizeKeywordText(entry).replace(/\s+/g, "") === normalized)) return id;
+  }
+  return ["energy", "kinetic"].includes(normalized) ? normalized : "";
+}
+
+function collectDismembermentDamageTypes(value, types) {
+  if (value === null || value === undefined) return;
+  if (value instanceof Set || Array.isArray(value)) {
+    for (const entry of value) collectDismembermentDamageTypes(entry, types);
+    return;
+  }
+  if (typeof value === "object") {
+    if (value.types !== undefined) collectDismembermentDamageTypes(value.types, types);
+    if (value.type !== undefined) collectDismembermentDamageTypes(value.type, types);
+    return;
+  }
+  const type = dismembermentDamageTypeId(value);
+  if (type) types.add(type);
+}
+
+function dismembermentWeaponDamageTypes(item, activity) {
+  const types = new Set();
+  if (activity?.damage?.includeBase !== false) collectDismembermentDamageTypes(item?.system?.damage?.base, types);
+  collectDismembermentDamageTypes(activity?.damage?.parts, types);
+  collectDismembermentDamageTypes(item?.system?.damage?.parts, types);
+  collectDismembermentDamageTypes(item?.system?.damage?.versatile, types);
+  return [...types];
+}
+
+function dismembermentDamageTraitValues(actor, traitId) {
+  const trait = getActorSystem(actor, `traits.${traitId}`) ?? {};
+  const values = new Set();
+  const add = (value) => {
+    if (value === null || value === undefined || value === "") return;
+    if (value instanceof Set || Array.isArray(value)) {
+      for (const entry of value) add(entry);
+      return;
+    }
+    if (typeof value === "object") {
+      for (const [key, enabled] of Object.entries(value)) if (enabled) add(key);
+      return;
+    }
+    const type = dismembermentDamageTypeId(value);
+    if (type) values.add(type);
+    const normalized = normalizeKeywordText(value);
+    if (normalized === "all" || normalized.includes("all damage")) values.add("all");
+  };
+  add(trait.value);
+  for (const custom of String(trait.custom ?? "").split(/[;,]/)) add(custom.trim());
+  return values;
+}
+
+function dismembermentDamageProfile(targetActor, item, activity) {
+  const types = dismembermentWeaponDamageTypes(item, activity);
+  const immunities = dismembermentDamageTraitValues(targetActor, "di");
+  const resistances = dismembermentDamageTraitValues(targetActor, "dr");
+  const matches = (set, type) => set.has("all") || set.has(type);
+  return {
+    types,
+    immune: types.length > 0 && types.every((type) => matches(immunities, type)),
+    resistant: types.some((type) => matches(resistances, type))
+  };
+}
+
+function dismembermentAbility(actor, activity) {
+  let abilityId = "";
+  try {
+    abilityId = activity?.ability ?? activity?.attack?.ability ?? "";
+  } catch (_error) {
+    abilityId = activity?.attack?.ability ?? "";
+  }
+  if (!(abilityId in (CONFIG?.DND5E?.abilities ?? {}))) {
+    const actionType = String(activity?.actionType ?? "").toLowerCase();
+    abilityId = actionType.startsWith("r") ? "dex" : "str";
+  }
+  return { id: abilityId, modifier: actorAbilityMod(actor, abilityId) };
+}
+
+function dismembermentResult(total) {
+  return DISMEMBERMENT_RESULTS.find((entry) => total >= entry.minimum && total <= entry.maximum) ?? null;
+}
+
+function workflowDismembermentTarget(workflow) {
+  const hits = new Set([...(workflow?.hitTargets ?? []), ...(workflow?.hitTargetsEC ?? [])]);
+  const candidates = hits.size ? [...hits] : [...(workflow?.targets ?? [])];
+  const targets = candidates.map((target) => target?.object?.actor ? target.object : target).filter((target) => target?.actor);
+  return targets.length === 1 ? targets[0] : null;
+}
+
+function claimDismembermentAttack(item, attackRoll, workflowKey = "") {
+  if (workflowKey) return claimPowerCast(RECENT_DISMEMBERMENT_ATTACKS, item, workflowKey);
+  if (!attackRoll || typeof attackRoll !== "object") return true;
+  if (PROCESSED_DISMEMBERMENT_ROLLS.has(attackRoll)) return false;
+  PROCESSED_DISMEMBERMENT_ROLLS.add(attackRoll);
+  return true;
+}
+
+function dismembermentDamageLabel(types) {
+  return types.map((type) => {
+    const data = CONFIG?.DND5E?.damageTypes?.[type];
+    return game.i18n?.localize?.(data?.label ?? data) ?? data?.label ?? data ?? type;
+  }).join(", ");
+}
+
+function requestGmDismembermentAdjudication({ actor, item, activity, target }) {
+  const activeGm = game.users
+    .filter((user) => user.active && user.isGM)
+    .sort((a, b) => a.id.localeCompare(b.id))[0];
+  if (!activeGm) {
+    ui.notifications.warn("Dismemberment requires an active GM to adjudicate the result.");
+    return false;
+  }
+
+  game.socket.emit(`module.${MODULE_ID}`, {
+    type: "dismembermentCriticalRequest",
+    payload: {
+      requestId: foundry.utils.randomID(),
+      requestingUserId: game.user.id,
+      actorUuid: actor?.uuid,
+      itemUuid: item?.uuid,
+      itemId: item?.id,
+      activityUuid: activity?.uuid,
+      activityId: activity?.id,
+      targetUuid: target?.document?.uuid ?? target?.uuid
+    }
+  });
+  ui.notifications.info(`Dismemberment adjudication sent to ${activeGm.name}.`);
+  return true;
+}
+
+function dismembermentActivityFromItem(item, activityId) {
+  if (!item || !activityId) return null;
+  const activities = item.system?.activities;
+  if (typeof activities?.get === "function") return activities.get(activityId) ?? null;
+  return Array.from(activities ?? []).find((activity) => activity?.id === activityId) ?? null;
+}
+
+async function handleDismembermentCriticalRequest(payload) {
+  if (!isResponsibleGM() || !payload?.requestId) return;
+  try {
+    const [actorDocument, itemDocument, activityDocument, targetDocument] = await Promise.all([
+      payload.actorUuid ? fromUuid(payload.actorUuid) : null,
+      payload.itemUuid ? fromUuid(payload.itemUuid) : null,
+      payload.activityUuid ? fromUuid(payload.activityUuid) : null,
+      payload.targetUuid ? fromUuid(payload.targetUuid) : null
+    ]);
+    const item = itemDocument ?? actorDocument?.items?.get(payload.itemId);
+    const actor = item?.actor ?? actorDocument;
+    const activity = activityDocument ?? dismembermentActivityFromItem(item, payload.activityId);
+    const target = targetDocument?.object ?? targetDocument;
+    if (!actor || !item || !target?.actor || !dismembermentWeaponCategory(item)) {
+      console.warn(`${MODULE_ID} | Rejected incomplete Dismemberment request`, payload);
+      return;
+    }
+    await processDismembermentCritical({
+      actor,
+      item,
+      activity,
+      target,
+      workflowKey: `socket:${payload.requestId}`
+    });
+  } catch (error) {
+    console.error(`${MODULE_ID} | GM Dismemberment request failed`, error);
+    ui.notifications.error("SWVR could not process the requested Dismemberment adjudication. Check the console for details.");
+  }
+}
+
+function showDismembermentAdjudicationDialog({ actor, item, target, result, location, ability }) {
+  const attackerName = escapeHtml(actor?.name ?? "The attacker");
+  const targetName = escapeHtml(target?.name ?? target?.document?.name ?? target?.actor?.name ?? "the target");
+  const itemName = escapeHtml(item?.name ?? "the weapon");
+  const bodyPart = escapeHtml(result.bodyPart);
+  const modifier = ability.modifier >= 0 ? `+${ability.modifier}` : String(ability.modifier);
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const finish = (decision) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(decision);
+    };
+    new Dialog({
+      title: `Dismemberment Adjudication: ${targetName}`,
+      content: `<form class="sw5e-vr-dismemberment-adjudication"><p><strong>${attackerName}</strong> confirmed a critical dismemberment against <strong>${targetName}</strong> with <strong>${itemName}</strong>.</p><p class="sw5e-vr-dismemberment-roll-result"><i class="fas fa-dice"></i> Location ${escapeHtml(location)}: <strong>${bodyPart}</strong></p><fieldset><legend>GM ruling</legend><label><input type="radio" name="decision" value="eligible" checked> <span><strong>Eligible for dismemberment</strong><small>Apply the rolled ${bodyPart} result.</small></span></label><label><input type="radio" name="decision" value="legendary-resistance"> <span><strong>Use Legendary Resistance</strong><small>Prevent dismemberment and apply ${escapeHtml(modifier)} additional damage.</small></span></label><label><input type="radio" name="decision" value="missing-limb"> <span><strong>Lacks a severable ${bodyPart}</strong><small>Substitute ${escapeHtml(modifier)} additional damage.</small></span></label><label><input type="radio" name="decision" value="ineligible"> <span><strong>Otherwise ineligible</strong><small>Prevent dismemberment without substitution damage.</small></span></label></fieldset></form>`,
+      buttons: {
+        confirm: {
+          icon: '<i class="fas fa-gavel"></i>',
+          label: "Apply Ruling",
+          callback: (html) => finish(String(html.find("input[name='decision']:checked").val() ?? "ineligible"))
+        },
+        cancel: {
+          icon: '<i class="fas fa-times"></i>',
+          label: "Cancel",
+          callback: () => finish("cancelled")
+        }
+      },
+      default: "confirm",
+      close: () => finish("cancelled")
+    }).render(true);
+  });
+}
+
+async function createDismembermentChatMessage({ actor, item, target, status, content, rolls = [], detail }) {
+  const messageData = {
+    speaker: ChatMessage.getSpeaker({ actor }),
+    content,
+    flags: {
+      [MODULE_ID]: {
+        dismemberment: {
+          status,
+          attackerActorId: actor?.id,
+          attackerName: actor?.name,
+          targetActorId: target?.actor?.id,
+          targetTokenId: target?.id ?? target?.document?.id,
+          targetName: target?.name ?? target?.document?.name,
+          itemId: item?.id,
+          itemName: item?.name,
+          ...detail
+        }
+      }
+    }
+  };
+  if (rolls.length) messageData.rolls = rolls;
+  await ChatMessage.create(messageData);
+}
+
+async function processDismembermentCritical({ actor, item, activity, target, attackRoll, workflowKey = "" }) {
+  if (!isEnabled("dismemberment") || !actor || !target?.actor) return;
+  const category = dismembermentWeaponCategory(item);
+  if (!category || !claimDismembermentAttack(item, attackRoll, workflowKey)) return;
+
+  if (!game.user.isGM) {
+    requestGmDismembermentAdjudication({ actor, item, activity, target });
+    return;
+  }
+
+  const attackerName = escapeHtml(actor.name ?? "The attacker");
+  const targetName = escapeHtml(target.name ?? target.document?.name ?? target.actor.name ?? "the target");
+  const weaponName = escapeHtml(item.name ?? category);
+  const damage = dismembermentDamageProfile(target.actor, item, activity);
+  const damageLabel = escapeHtml(dismembermentDamageLabel(damage.types) || "untyped");
+
+  if (damage.immune) {
+    await createDismembermentChatMessage({
+      actor,
+      item,
+      target,
+      status: "immune",
+      content: `<section class="sw5e-vr-dismemberment-card prevented"><header><i class="fas fa-shield-alt"></i><span>DISMEMBERMENT PREVENTED</span></header><p><strong>${targetName}</strong> is immune to the ${damageLabel} damage dealt by <strong>${weaponName}</strong> and cannot be dismembered by this attack.</p></section>`,
+      detail: { category, damageTypes: damage.types }
+    });
+    return;
+  }
+
+  const forceConfirmation = forceDismembermentConfirmationEnabled();
+  const confirmationFormula = damage.resistant ? "2d20kl" : "1d20";
+  const confirmation = await new Roll(confirmationFormula, {}, {
+    flavor: `Dismemberment Confirmation${damage.resistant ? " (Disadvantage: Damage Resistance)" : ""}${forceConfirmation ? " (DEV Forced)" : ""}`
+  }).evaluate(forceConfirmation ? { maximize: true } : {});
+  const confirmationTotal = Number(confirmation.total);
+  const confirmationResult = `<p class="sw5e-vr-dismemberment-check-result"><i class="fas fa-dice-d20"></i> Confirmation die: rolled <strong>${escapeHtml(confirmationTotal)}</strong>.${forceConfirmation ? " <em>DEV forced confirmation.</em>" : ""}</p>`;
+  if (confirmationTotal !== 20) {
+    await createDismembermentChatMessage({
+      actor,
+      item,
+      target,
+      status: "not-confirmed",
+      rolls: [confirmation],
+      content: `<section class="sw5e-vr-dismemberment-card failed"><header><i class="fas fa-dice-d20"></i><span>DISMEMBERMENT CHECK</span></header><p><strong>${attackerName}</strong>'s critical hit with <strong>${weaponName}</strong> did not confirm dismemberment against <strong>${targetName}</strong>.</p>${damage.resistant ? `<p class="sw5e-vr-dismemberment-note"><i class="fas fa-shield-alt"></i> Rolled with disadvantage because the target resists ${damageLabel} damage.</p>` : ""}${confirmationResult}</section>`,
+      detail: {
+        category,
+        damageTypes: damage.types,
+        resistant: damage.resistant,
+        confirmation: confirmationTotal
+      }
+    });
+    return;
+  }
+
+  const locationRoll = await new Roll("1d100", {}, { flavor: "Dismemberment Location" }).evaluate();
+  const result = dismembermentResult(Number(locationRoll.total));
+  if (!result) return;
+  const ability = dismembermentAbility(actor, activity);
+  const modifier = ability.modifier >= 0 ? `+${ability.modifier}` : String(ability.modifier);
+  const decision = await showDismembermentAdjudicationDialog({
+    actor,
+    item,
+    target,
+    result,
+    location: Number(locationRoll.total),
+    ability
+  });
+
+  if (decision !== "eligible") {
+    const decisions = {
+      "legendary-resistance": {
+        status: "legendary-resistance",
+        title: "LEGENDARY RESISTANCE",
+        icon: "fas fa-shield-alt",
+        text: `<strong>${targetName}</strong> uses Legendary Resistance to prevent the confirmed dismemberment and instead takes additional damage equal to the attack's ${escapeHtml(ability.id.toUpperCase())} modifier (${escapeHtml(modifier)}). Apply that damage manually.`
+      },
+      "missing-limb": {
+        status: "missing-limb",
+        title: "NO SEVERABLE LIMB",
+        icon: "fas fa-ban",
+        text: `<strong>${targetName}</strong> lacks a severable <strong>${escapeHtml(result.bodyPart)}</strong>. The confirmed dismemberment instead deals additional damage equal to the attack's ${escapeHtml(ability.id.toUpperCase())} modifier (${escapeHtml(modifier)}). Apply that damage manually.`
+      },
+      ineligible: {
+        status: "ineligible",
+        title: "DISMEMBERMENT INELIGIBLE",
+        icon: "fas fa-ban",
+        text: `The GM determined that <strong>${targetName}</strong> is not eligible for dismemberment. No dismemberment is applied.`
+      },
+      cancelled: {
+        status: "cancelled",
+        title: "ADJUDICATION CANCELLED",
+        icon: "fas fa-times",
+        text: `The GM cancelled the Dismemberment ruling for <strong>${targetName}</strong>. No dismemberment is applied.`
+      }
+    };
+    const ruling = decisions[decision] ?? decisions.cancelled;
+    await createDismembermentChatMessage({
+      actor,
+      item,
+      target,
+      status: ruling.status,
+      rolls: [confirmation, locationRoll],
+      content: `<section class="sw5e-vr-dismemberment-card prevented"><header><i class="${ruling.icon}"></i><span>${ruling.title}</span></header><p>${ruling.text}</p>${confirmationResult}</section>`,
+      detail: {
+        category,
+        damageTypes: damage.types,
+        resistant: damage.resistant,
+        confirmation: confirmationTotal,
+        location: Number(locationRoll.total),
+        bodyPart: result.bodyPart,
+        abilityId: ability.id,
+        abilityModifier: ability.modifier,
+        gmDecision: decision
+      }
+    });
+    return;
+  }
+
+  await createDismembermentChatMessage({
+    actor,
+    item,
+    target,
+    status: "confirmed",
+    rolls: [confirmation, locationRoll],
+    content: `<section class="sw5e-vr-dismemberment-card confirmed"><header><i class="fas fa-skull"></i><span>CRITICAL DISMEMBERMENT</span></header><p class="sw5e-vr-dismemberment-verdict"><strong>${attackerName}</strong> has <b>DISMEMBERED</b> <strong>${targetName}</strong> by removing their <strong>${escapeHtml(result.bodyPart)}</strong>.</p><p>${escapeHtml(result.detail)}</p><p class="sw5e-vr-dismemberment-note"><i class="fas fa-gavel"></i> GM adjudication approved this result. Apply anatomy-dependent conditions and movement changes manually.</p>${confirmationResult}</section>`,
+    detail: {
+      category,
+      damageTypes: damage.types,
+      resistant: damage.resistant,
+      confirmation: confirmationTotal,
+      location: Number(locationRoll.total),
+      bodyPart: result.bodyPart,
+      abilityId: ability.id,
+      abilityModifier: ability.modifier,
+      gmDecision: decision
+    }
+  });
+}
+
+async function handleDismembermentPostRollAttack(rolls, process) {
+  if (midiWorkflowEnabled() || !isEnabled("dismemberment")) return;
+  const attackRoll = rolls?.[0];
+  if (!attackRoll || OBSERVED_DISMEMBERMENT_ROLLS.has(attackRoll)) return;
+  OBSERVED_DISMEMBERMENT_ROLLS.add(attackRoll);
+  if (!isDismembermentCriticalRoll(attackRoll)) return;
+  const activity = process?.subject;
+  const item = activity?.item;
+  if (!dismembermentWeaponCategory(item)) {
+    ui.notifications.warn(`SWVR detected the critical hit, but ${item?.name ?? "the weapon"} is configured as ${dismembermentWeaponTypeLabel(item)}, not a lightweapon or vibroweapon.`);
+    return;
+  }
+  const target = singleTargetToken();
+  if (!target) {
+    ui.notifications.warn("Dismemberment requires exactly one targeted token when a qualifying critical hit is rolled.");
+    return;
+  }
+  try {
+    await processDismembermentCritical({ actor: activity?.actor ?? item?.actor, item, activity, target, attackRoll });
+  } catch (error) {
+    console.error(`${MODULE_ID} | Native Dismemberment workflow failed`, error);
+    ui.notifications.error("SWVR Dismemberment automation failed. Check the console for details.");
+  }
+}
+
+async function handleMidiDismembermentAttackRollComplete(workflow) {
+  if (!midiWorkflowEnabled() || !isEnabled("dismemberment")) return;
+  if (!workflow?.isCritical && !isDismembermentCriticalRoll(workflow?.attackRoll)) return;
+  const item = workflow.item ?? workflow.activity?.item;
+  if (!dismembermentWeaponCategory(item)) return;
+  const target = workflowDismembermentTarget(workflow);
+  if (!target) {
+    ui.notifications.warn("Dismemberment requires exactly one hit target in the Midi-QOL workflow.");
+    return;
+  }
+  const workflowId = workflow.id ?? workflow.uuid ?? workflow.itemCardUuid;
+  try {
+    await processDismembermentCritical({
+      actor: workflow.actor ?? workflow.activity?.actor ?? item?.actor,
+      item,
+      activity: workflow.activity,
+      target,
+      attackRoll: workflow.attackRoll,
+      workflowKey: workflowId ? `midi:${workflowId}:dismemberment` : ""
+    });
+  } catch (error) {
+    console.error(`${MODULE_ID} | Midi-QOL Dismemberment workflow failed`, error);
+    ui.notifications.error("SWVR Dismemberment automation failed. Check the console for details.");
+  }
 }
 
 function handleAlternativeArmorPostBuildAttackRollConfig(_process, rollConfig, index) {
@@ -3318,6 +3903,9 @@ class VariantRulesConfig extends FormApplication {
       sourceUrl: SOURCE_URL,
       chatReminders: game.settings.get(MODULE_ID, "chatReminders"),
       useModifiedActorSheet: useModifiedActorSheet(),
+      devTools: IS_DEV_BUILD ? {
+        forceDismembermentConfirmation: forceDismembermentConfirmationEnabled()
+      } : null,
       midiCompatibility: midiCompatibilityState(),
       categories
     };
@@ -3330,6 +3918,9 @@ class VariantRulesConfig extends FormApplication {
     await setEnabledRules(enabled);
     await game.settings.set(MODULE_ID, "chatReminders", Boolean(formData.chatReminders));
     await game.settings.set(MODULE_ID, "useModifiedActorSheet", Boolean(formData.useModifiedActorSheet));
+    if (IS_DEV_BUILD) {
+      await game.settings.set(MODULE_ID, "forceDismembermentConfirmation", Boolean(formData.forceDismembermentConfirmation));
+    }
     if (previous["milestone-leveling"] !== enabled["milestone-leveling"]) {
       await syncMilestoneLevelingSetting(enabled["milestone-leveling"]);
     }
@@ -3361,6 +3952,11 @@ class VariantRulesConfig extends FormApplication {
     });
     html.find("[data-action='midi-restore']").on("click", async () => {
       await restoreMidiCompatibilitySettings();
+      this.render(false);
+    });
+    html.find("[data-action='midi-resolve']").on("click", async (event) => {
+      const { conflictId, provider } = event.currentTarget.dataset;
+      await resolveMidiCompatibilityConflict(conflictId, provider);
       this.render(false);
     });
   }
@@ -4311,6 +4907,17 @@ Hooks.once("init", () => {
     requiresReload: true
   });
 
+  if (IS_DEV_BUILD) {
+    game.settings.register(MODULE_ID, "forceDismembermentConfirmation", {
+      name: "Force Dismemberment Confirmation",
+      hint: "DEV only: maximize the Dismemberment confirmation d20 so the GM adjudication and result workflow can be tested.",
+      scope: "world",
+      config: false,
+      type: Boolean,
+      default: false
+    });
+  }
+
   game.settings.register(MODULE_ID, "disturbanceLedger", {
     name: "Hunted Disturbance Ledger",
     scope: "world",
@@ -4360,6 +4967,10 @@ Hooks.once("ready", () => {
   }
 
   game.socket.on(`module.${MODULE_ID}`, (message) => {
+    if (message?.type === "dismembermentCriticalRequest" && isResponsibleGM()) {
+      handleDismembermentCriticalRequest(message.payload);
+      return;
+    }
     if (message?.type === "huntedForcePowerCast" && isResponsibleGM()) {
       recordDisturbanceCast(message.payload);
       return;
@@ -4414,6 +5025,7 @@ Hooks.once("ready", () => {
     midiCompatibilityState,
     applyRecommendedMidiCompatibilitySettings,
     restoreMidiCompatibilitySettings,
+    resolveMidiCompatibilityConflict,
     applyTacticalInitiative
   };
 });
@@ -4492,6 +5104,8 @@ Hooks.on("dnd5e.postBuildSavingThrowRollConfig", handleElevationPostBuildSavingT
 Hooks.on("dnd5e.postSavingThrowRollConfiguration", handleElevationPostSavingThrowRollConfiguration);
 Hooks.on("dnd5e.postBuildAttackRollConfig", handleAlternativeArmorPostBuildAttackRollConfig);
 Hooks.on("dnd5e.postAttackRollConfiguration", handleAlternativeArmorPostAttackRollConfiguration);
+Hooks.on("dnd5e.rollAttack", handleDismembermentPostRollAttack);
+Hooks.on("dnd5e.postRollAttack", handleDismembermentPostRollAttack);
 Hooks.on("dnd5e.postDamageRollConfiguration", markAlternativeArmorAttackDamage);
 Hooks.on("sw5e.postDamageRollConfiguration", markAlternativeArmorAttackDamage);
 Hooks.on("dnd5e.rollDamage", markAlternativeArmorAttackDamage);
@@ -4499,6 +5113,7 @@ Hooks.on("sw5e.rollDamage", markAlternativeArmorAttackDamage);
 Hooks.on("dnd5e.calculateDamage", applyAlternativeArmorDamageReduction);
 Hooks.on("sw5e.calculateDamage", applyAlternativeArmorDamageReduction);
 Hooks.on("midi-qol.dnd5eCalculateDamage", applyAlternativeArmorDamageReduction);
+Hooks.on("midi-qol.AttackRollComplete", handleMidiDismembermentAttackRollComplete);
 Hooks.on("midi-qol.RollComplete", handleMidiWorkflowComplete);
 Hooks.on("dnd5e.rollAbilityTest", handleRollAbilityTest);
 Hooks.on("sw5e.rollAbilityTest", handleRollAbilityTest);

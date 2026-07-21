@@ -16,6 +16,17 @@
     <p class="notes">Adds SWVR panels and popouts for supported actor-facing rules.</p>
   </div>
 
+  {{#if devTools}}
+    <fieldset class="sw5e-vr-dev-tools">
+      <legend>DEV Testing</legend>
+      <label>
+        <input type="checkbox" name="forceDismembermentConfirmation" {{checked devTools.forceDismembermentConfirmation}}>
+        Force Dismemberment confirmation
+      </label>
+      <p class="notes">Maximizes the confirmation d20 for testing. This control is unavailable in release builds.</p>
+    </fieldset>
+  {{/if}}
+
   <div class="sw5e-vr-actions">
     <button type="button" data-action="enable-all"><i class="fas fa-check-square"></i> Enable All</button>
     <button type="button" data-action="disable-all"><i class="fas fa-square"></i> Disable All</button>
@@ -38,7 +49,13 @@
               <span class="sw5e-vr-midi-status {{statusClass}}">{{status}}</span>
             </div>
             <small>{{detail}}</small>
-            <small><b>Current:</b> {{current}} <b>Recommended:</b> {{recommended}}</small>
+            <small><b>Current:</b> {{current}} <b>SWVR resolution:</b> {{recommended}}</small>
+            {{#if actionable}}
+              <div class="sw5e-vr-midi-provider-choice" role="group" aria-label="Choose provider for {{label}}">
+                <button type="button" data-action="midi-resolve" data-conflict-id="{{id}}" data-provider="swvr"><i class="fas fa-shield-alt"></i> Use SWVR</button>
+                <button type="button" data-action="midi-resolve" data-conflict-id="{{id}}" data-provider="midi"><i class="fas fa-cogs"></i> Use Midi-QOL</button>
+              </div>
+            {{/if}}
           </li>
         {{/each}}
       </ol>
@@ -46,7 +63,7 @@
     {{#if midiCompatibility.active}}
       <div class="sw5e-vr-midi-actions">
         {{#if midiCompatibility.hasActionable}}
-          <button type="button" data-action="midi-apply"><i class="fas fa-shield-alt"></i> Apply Recommended Settings</button>
+          <button type="button" data-action="midi-apply"><i class="fas fa-shield-alt"></i> Use SWVR for All Conflicts</button>
         {{/if}}
         {{#if midiCompatibility.hasBackup}}
           <button type="button" data-action="midi-restore"><i class="fas fa-undo"></i> Restore Previous Settings</button>

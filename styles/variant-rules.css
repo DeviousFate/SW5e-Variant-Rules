@@ -80,6 +80,131 @@
   margin-top: 0.5rem;
 }
 
+.sw5e-vr-midi-provider-choice {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.4rem;
+  max-width: 360px;
+}
+
+.sw5e-vr-midi-provider-choice button {
+  border-radius: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.sw5e-vr-midi-provider-choice button:first-child {
+  border-radius: 3px 0 0 3px;
+}
+
+.sw5e-vr-midi-provider-choice button:last-child {
+  border-radius: 0 3px 3px 0;
+}
+
+.sw5e-vr-dev-tools {
+  border: 1px solid #a86f14;
+  margin: 0.65rem 0;
+  padding: 0.5rem 0.65rem;
+}
+
+.sw5e-vr-dev-tools legend {
+  color: #8a5500;
+  font-weight: 700;
+}
+
+.sw5e-vr-dismemberment-card {
+  background: #17191c;
+  border: 1px solid #7d2025;
+  border-left: 4px solid #b72a32;
+  color: #e8eaed;
+  padding: 0.65rem 0.75rem;
+}
+
+.sw5e-vr-dismemberment-card header {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ff4b55;
+  display: flex;
+  font-size: 0.85rem;
+  font-weight: 800;
+  gap: 0.45rem;
+  letter-spacing: 0;
+  padding-bottom: 0.4rem;
+}
+
+.sw5e-vr-dismemberment-card p {
+  margin: 0.55rem 0 0;
+}
+
+.sw5e-vr-dismemberment-card.failed,
+.sw5e-vr-dismemberment-card.prevented {
+  border-color: #5f6872;
+  border-left-color: #87919c;
+}
+
+.sw5e-vr-dismemberment-card.failed header,
+.sw5e-vr-dismemberment-card.prevented header {
+  color: #c7d0d8;
+}
+
+.sw5e-vr-dismemberment-verdict b {
+  color: #ff4b55;
+}
+
+.sw5e-vr-dismemberment-check-result {
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.82rem;
+  padding-top: 0.45rem;
+}
+
+.sw5e-vr-dismemberment-note {
+  background: rgba(255, 255, 255, 0.07);
+  border-left: 2px solid #9ba5ae;
+  color: #d3d8dd;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  padding: 0.4rem 0.5rem;
+}
+
+.sw5e-vr-dismemberment-adjudication > p {
+  margin: 0 0 0.65rem;
+}
+
+.sw5e-vr-dismemberment-roll-result {
+  background: #17191c;
+  border-left: 3px solid #b72a32;
+  color: #e8eaed;
+  padding: 0.5rem 0.6rem;
+}
+
+.sw5e-vr-dismemberment-adjudication fieldset {
+  border: 1px solid var(--color-border-light-primary, #7a7971);
+  margin: 0;
+  padding: 0.4rem 0.55rem 0.55rem;
+}
+
+.sw5e-vr-dismemberment-adjudication label {
+  align-items: flex-start;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0.4rem 0;
+}
+
+.sw5e-vr-dismemberment-adjudication label + label {
+  border-top: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.sw5e-vr-dismemberment-adjudication input[type="radio"] {
+  margin-top: 0.2rem;
+}
+
+.sw5e-vr-dismemberment-adjudication label span,
+.sw5e-vr-dismemberment-adjudication label small {
+  display: block;
+}
+
 .sw5e-vr-rule-list {
   list-style: none;
   margin: 0;

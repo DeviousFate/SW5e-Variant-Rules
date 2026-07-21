@@ -11,7 +11,7 @@ This module is intended for GMs who want table-level control over variant rule o
 - Required module: SW5e module 1.3.8 minimum
 - Optional integration: Midi-QOL v13
 
-When Midi-QOL is active, the SWVR configuration window displays a compatibility report. GMs can apply confirmed recommended settings and later restore the values SWVR backed up. SWVR does not silently change Midi-QOL configuration.
+When Midi-QOL is active, the SWVR configuration window displays a compatibility report. Each active conflict lets the GM choose SWVR or Midi-QOL as the provider. Choosing SWVR backs up and disables only the competing Midi setting; choosing Midi-QOL disables the corresponding SWVR rule and restores its backed-up Midi values. SWVR does not silently change either configuration.
 
 ## Installation
 
@@ -34,6 +34,7 @@ https://github.com/DeviousFate/SW5e-Variant-Rules/releases/latest/download/modul
 - **ASI and a Feat**: Syncs the SW5e module's ASI and Feat setting.
 - **Simplified Forcecasting**: Syncs the SW5e module's Simplified Forcecasting setting.
 - **Elevation**: Applies relational attack, AC, and Dexterity-save adjustments from dominance, superdominance, and hyperdominance.
+- **Dismemberment**: Detects critical hits with lightweapons and vibroweapons, accounts for simple damage immunity and resistance, rolls confirmation and location dice, requests a GM eligibility ruling, and posts themed results to chat.
 
 ## Assisted Character Building
 
